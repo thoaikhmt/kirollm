@@ -92,7 +92,7 @@ def test_langchain_image_url_becomes_kiro_image():
         {"type": "text", "text": "What is this?"},
         {"type": "image_url", "image_url": {"url": data_url}},
     ])]
-    history, current, images, tool_results = _messages_to_kiro(messages)
+    history, current, images, tool_results, system_prompt = _messages_to_kiro(messages)
     assert history == []
     assert current == "What is this?"
     assert len(images) == 1
@@ -126,3 +126,16 @@ def test_voice_adapter_rejects_empty_transcription():
     chat = ChatSession(KiroLLMClient(access_token="t", session=session))
     with pytest.raises(VoiceInputError):
         chat.send_voice(AudioInput(b"wav"), lambda audio: "  ")
+
+
+def test_chat_session_sends_document_in_current_message(tmp_path):
+    document_path = tmp_path / "notes.txt"
+    document_path.write_text("hello document")
+    body = _event("assistantResponseEvent", {"content": "seen"})
+    session = _Session(body)
+    chat = ChatSession(KiroLLMClient(access_token="t", session=session))
+
+    assert chat.send("Read this", documents=[document_path]) == "seen"
+    current = session.last_body["conversationState"]["currentMessage"]["userInputMessage"]
+    assert current["documents"][0]["format"] == "txt"
+    assert current["documents"][0]["name"] == "notes.txt"

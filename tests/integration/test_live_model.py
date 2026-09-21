@@ -25,10 +25,17 @@ def test_live_kiro_model_returns_assistant_text():
         max_attempts=1,
     )
     try:
+        catalog = client.list_models()
+        assert catalog.models, "Kiro advertised no models"
+        model_id = os.getenv("KIRO_MODEL_ID") or catalog.default_model or catalog.models[0].model_id
+        if model_id not in catalog.model_ids:
+            raise AssertionError(f"KIRO_MODEL_ID is not advertised: {model_id}")
         events = client.generate_assistant_response(
             ConversationState(
                 current_message=UserInputMessage(
-                    content="Reply with exactly the word OK."
+                    content="Reply with exactly the word OK.",
+                    model_id=model_id,
+                    origin="AI_EDITOR",
                 )
             )
         )

@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import time
 from email.utils import parsedate_to_datetime
-from typing import Any, Dict, Iterator, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 import requests
 
@@ -34,17 +34,23 @@ from .models import (
     AssistantResponseEvent,
     ChatResponseStreamEvent,
     CodeReferenceEvent,
+    ContextUsageEvent,
     ConversationState,
     FollowupPromptEvent,
     InvalidStateEvent,
+    KiroModel,
+    KiroModelCatalog,
     MetadataEvent,
+    ModelUnavailableEvent,
     ReasoningEvent,
     ToolUseEvent,
+    SupplementaryWebLinksEvent,
     UnknownEvent,
 )
 
 _TARGET_SERVICE = "AmazonCodeWhispererStreamingService"
 _GENERATE_ASSISTANT_RESPONSE = f"{_TARGET_SERVICE}.GenerateAssistantResponse"
+_LIST_AVAILABLE_MODELS = "AmazonCodeWhispererService.ListAvailableModels"
 
 # Region -> service endpoint, mirroring the Kiro CLI endpoint table.
 CODEWHISPERER_ENDPOINTS: Dict[str, str] = {
@@ -223,13 +229,19 @@ class KiroLLMClient:
     # ------------------------------------------------------------------ #
     # Header + body construction
     # ------------------------------------------------------------------ #
-    def _headers(self, attempt: int = 1) -> Dict[str, str]:
+    def _headers(
+        self,
+        attempt: int = 1,
+        *,
+        target: str = _GENERATE_ASSISTANT_RESPONSE,
+        accept: str = "application/vnd.amazon.eventstream",
+    ) -> Dict[str, str]:
         headers = {
             "Authorization": f"Bearer {self._current_access_token()}",
             "Content-Type": "application/x-amz-json-1.0",
-            "X-Amz-Target": _GENERATE_ASSISTANT_RESPONSE,
+            "X-Amz-Target": target,
             "User-Agent": self.user_agent,
-            "Accept": "application/vnd.amazon.eventstream",
+            "Accept": accept,
             "x-kiro-attempt": str(attempt),
         }
         if self._auth_type == "API_KEY":
@@ -247,6 +259,113 @@ class KiroLLMClient:
         elif self._auth_type == "API_KEY":
             headers["x-amzn-kiro-agent-mode"] = "vibe"
         return headers
+
+    def list_models(
+        self,
+        *,
+        model_provider: Optional[str] = None,
+        max_results: Optional[int] = None,
+        next_token: Optional[str] = None,
+    ) -> KiroModelCatalog:
+        """Return models advertised for this credential and region.
+
+        Kiro's model catalog is entitlement- and region-dependent. This method
+        calls ``AmazonCodeWhispererService.ListAvailableModels`` instead of
+        relying on a stale client-side model list.
+        """
+        request_body: Dict[str, Any] = {
+            "origin": "AI_EDITOR" if self._auth_type == "API_KEY" else "CLI"
+        }
+        if model_provider:
+            request_body["modelProvider"] = model_provider
+        if max_results is not None:
+            if not 1 <= max_results <= 100:
+                raise ValueError("max_results must be between 1 and 100")
+            request_body["maxResults"] = max_results
+        if next_token:
+            request_body["nextToken"] = next_token
+
+        for attempt in range(1, self.max_attempts + 1):
+            try:
+                response = self._session.post(
+                    self.endpoint + "/",
+                    headers=self._headers(
+                        attempt,
+                        target=_LIST_AVAILABLE_MODELS,
+                        accept="application/json",
+                    ),
+                    json=request_body,
+                    stream=False,
+                    timeout=self.timeout,
+                )
+            except requests.RequestException as exc:
+                if attempt >= self.max_attempts:
+                    raise KiroApiError(
+                        f"Model discovery request to {self.endpoint} failed"
+                    ) from exc
+                time.sleep(min(0.5 * (2 ** (attempt - 1)), 8.0))
+                continue
+
+            if response.status_code in (429, 500, 502, 503, 504) and attempt < self.max_attempts:
+                delay = _retry_delay(response, attempt)
+                response.close()
+                time.sleep(delay)
+                continue
+            if response.status_code >= 400:
+                try:
+                    detail = _http_error_detail(response)
+                finally:
+                    response.close()
+                raise KiroApiError(
+                    f"Model discovery HTTP {response.status_code} from {self.endpoint}{detail}",
+                    status_code=response.status_code,
+                )
+            try:
+                try:
+                    payload = response.json()
+                except (ValueError, requests.JSONDecodeError) as exc:
+                    raise KiroApiError("Model discovery returned invalid JSON") from exc
+            finally:
+                response.close()
+            break
+        else:
+            raise KiroApiError("Model discovery exhausted all attempts")
+
+        if not isinstance(payload, dict):
+            raise KiroApiError("Model discovery returned a non-object payload")
+        models: List[KiroModel] = []
+        for raw in payload.get("models") or []:
+            if not isinstance(raw, dict):
+                continue
+            model_id = raw.get("modelId") or raw.get("model_id")
+            if not isinstance(model_id, str) or not model_id:
+                continue
+            limits = raw.get("tokenLimits") or raw.get("token_limits") or {}
+            input_types = raw.get("supportedInputTypes") or raw.get("supported_input_types") or []
+            models.append(
+                KiroModel(
+                    model_id=model_id,
+                    name=str(raw.get("modelName") or raw.get("name") or model_id),
+                    description=raw.get("description"),
+                    supported_input_types=tuple(
+                        str(value) for value in input_types if isinstance(value, str)
+                    ),
+                    rate_multiplier=raw.get("rateMultiplier", raw.get("rate_multiplier")),
+                    max_input_tokens=limits.get("maxInputTokens", limits.get("max_input_tokens")),
+                    max_output_tokens=limits.get("maxOutputTokens", limits.get("max_output_tokens")),
+                    raw=dict(raw),
+                )
+            )
+        if not models:
+            raise KiroApiError("Model discovery returned no usable models")
+        default = payload.get("defaultModel") or payload.get("default_model")
+        if isinstance(default, dict):
+            default = default.get("modelId") or default.get("model_id")
+        return KiroModelCatalog(
+            models=tuple(models),
+            default_model=default if isinstance(default, str) else None,
+            next_token=payload.get("nextToken") or payload.get("next_token"),
+        )
 
     def _build_body(self, conversation_state: ConversationState) -> Dict[str, Any]:
         body = {"conversationState": conversation_state.to_dict()}
@@ -394,8 +513,21 @@ def _parse_event(message: EventStreamMessage) -> ChatResponseStreamEvent:
         followup = payload.get("followupPrompt", {})
         return FollowupPromptEvent(content=followup.get("content", payload.get("content", "")))
 
-    if event_type in ("metadataEvent", "messageMetadataEvent", "meteringEvent",
-                      "contextUsageEvent"):
+    if event_type == "supplementaryWebLinksEvent":
+        return SupplementaryWebLinksEvent(
+            links=payload.get("links") or payload.get("webLinks") or []
+        )
+
+    if event_type == "contextUsageEvent":
+        return ContextUsageEvent(raw=payload)
+
+    if event_type in ("modelTemporarilyUnavailableEvent", "modelUnavailableEvent"):
+        return ModelUnavailableEvent(
+            message=payload.get("message", "Selected model is temporarily unavailable"),
+            recommended_model=payload.get("recommendedModel") or payload.get("recommended_model"),
+        )
+
+    if event_type in ("metadataEvent", "messageMetadataEvent", "meteringEvent"):
         return MetadataEvent(raw=payload)
 
     if event_type == "invalidStateEvent":

@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Sequence, Union
 
 from .client import KiroLLMClient
-from .media import AudioInput, ImageInput, image_from_file
+from .media import AudioInput, DocumentInput, ImageInput, image_from_file
 from .voice import Transcriber, transcribe_audio
 from .models import (
     AssistantResponseEvent,
@@ -67,16 +67,24 @@ class ChatSession:
         content: str,
         tool_results: Optional[List[ToolResult]] = None,
         images: Optional[Sequence[Union[ImageInput, str, Path]]] = None,
+        documents: Optional[Sequence[Union[DocumentInput, str, Path]]] = None,
     ) -> UserInputMessage:
         normalized_images = [
             image_from_file(image) if isinstance(image, (str, Path)) else image
             for image in (images or [])
+        ]
+        normalized_documents = [
+            DocumentInput.from_file(document)
+            if isinstance(document, (str, Path))
+            else document
+            for document in (documents or [])
         ]
         ctx = UserInputMessageContext(tools=self.tools, tool_results=tool_results)
         return UserInputMessage(
             content=content,
             model_id=self.model_id,
             images=normalized_images or None,
+            documents=normalized_documents or None,
             context=ctx if (self.tools or tool_results) else None,
         )
 
@@ -130,18 +138,22 @@ class ChatSession:
         content: str,
         *,
         images: Optional[Sequence[Union[ImageInput, str, Path]]] = None,
+        documents: Optional[Sequence[Union[DocumentInput, str, Path]]] = None,
     ) -> Iterator[str]:
-        """Send a text/image message; yield assistant text chunks."""
-        yield from self._run_turn(self._user_message(content, images=images))
+        """Send a text/image/document message; yield assistant text chunks."""
+        yield from self._run_turn(
+            self._user_message(content, images=images, documents=documents)
+        )
 
     def send(
         self,
         content: str,
         *,
         images: Optional[Sequence[Union[ImageInput, str, Path]]] = None,
+        documents: Optional[Sequence[Union[DocumentInput, str, Path]]] = None,
     ) -> str:
-        """Send a text/image message; return the full assistant reply."""
-        return "".join(self.stream(content, images=images))
+        """Send a text/image/document message; return the full reply."""
+        return "".join(self.stream(content, images=images, documents=documents))
 
     def send_voice(
         self,
