@@ -75,6 +75,22 @@ SQLite authentication.
 
 ```python
 from kiro_llm import KiroLLMClient, ChatSession
+## Live model integration test
+
+The repository includes one real-model test at
+`tests/integration/test_live_model.py`. It is opt-in and skips when
+`KIRO_API_KEY` is absent. To run it locally:
+
+```bash
+KIRO_API_KEY="ksk_..." python -m pytest -q -m integration
+```
+
+GitHub Actions exposes the same test only through **Run workflow** with the
+`live_model` input enabled. The key is read from the repository Actions secret
+named `KIRO_API_KEY`; it is never stored in the repository or printed by the
+workflow. Normal pushes and pull requests run unit/static checks with
+integration tests excluded.
+
 
 client = KiroLLMClient()                       # auto-auth
 chat = ChatSession(client, model_id="claude-sonnet-4")

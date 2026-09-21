@@ -351,3 +351,25 @@ def test_default_credentials_use_environment_without_cli(monkeypatch):
     )
     provider = load_default_credentials()
     assert provider.get_access_token() == "environment-token"
+
+
+def test_api_key_mode_sets_kiro_headers_and_origin():
+    body = _event("assistantResponseEvent", {"content": "ok"})
+    session = _FakeSession(_FakeResponse(body))
+    client = KiroLLMClient(
+        access_token="ksk_test_key",
+        region="us-east-1",
+        session=session,
+    )
+    list(client.generate_assistant_response(
+        ConversationState(current_message=UserInputMessage(content="hi"))
+    ))
+    assert session.last_headers["Authorization"] == "Bearer ksk_test_key"
+    assert session.last_headers["tokentype"] == "API_KEY"
+    assert session.last_headers["x-amzn-kiro-agent-mode"] == "vibe"
+    assert session.last_headers["x-amzn-codewhisperer-optout"] == "true"
+    payload = json.loads(session.last_body)
+    assert (
+        payload["conversationState"]["currentMessage"]["userInputMessage"]["origin"]
+        == "AI_EDITOR"
+    )
