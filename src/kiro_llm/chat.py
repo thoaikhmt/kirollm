@@ -14,9 +14,12 @@ any tool-use requests the model makes so the caller can run them and reply with
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Iterator, List, Optional
+from pathlib import Path
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Union
 
 from .client import KiroLLMClient
+from .media import AudioInput, ImageInput, image_from_file
+from .voice import Transcriber, transcribe_audio
 from .models import (
     AssistantResponseEvent,
     AssistantResponseMessage,
@@ -60,12 +63,20 @@ class ChatSession:
         return state
 
     def _user_message(
-        self, content: str, tool_results: Optional[List[ToolResult]] = None
+        self,
+        content: str,
+        tool_results: Optional[List[ToolResult]] = None,
+        images: Optional[Sequence[Union[ImageInput, str, Path]]] = None,
     ) -> UserInputMessage:
+        normalized_images = [
+            image_from_file(image) if isinstance(image, (str, Path)) else image
+            for image in (images or [])
+        ]
         ctx = UserInputMessageContext(tools=self.tools, tool_results=tool_results)
         return UserInputMessage(
             content=content,
             model_id=self.model_id,
+            images=normalized_images or None,
             context=ctx if (self.tools or tool_results) else None,
         )
 
@@ -114,13 +125,39 @@ class ChatSession:
             ).to_dict()
         )
 
-    def stream(self, content: str) -> Iterator[str]:
-        """Send a user message; yield assistant text chunks as they arrive."""
-        yield from self._run_turn(self._user_message(content))
+    def stream(
+        self,
+        content: str,
+        *,
+        images: Optional[Sequence[Union[ImageInput, str, Path]]] = None,
+    ) -> Iterator[str]:
+        """Send a text/image message; yield assistant text chunks."""
+        yield from self._run_turn(self._user_message(content, images=images))
 
-    def send(self, content: str) -> str:
-        """Send a user message; return the full assistant reply."""
-        return "".join(self.stream(content))
+    def send(
+        self,
+        content: str,
+        *,
+        images: Optional[Sequence[Union[ImageInput, str, Path]]] = None,
+    ) -> str:
+        """Send a text/image message; return the full assistant reply."""
+        return "".join(self.stream(content, images=images))
+
+    def send_voice(
+        self,
+        audio: AudioInput,
+        transcriber: Transcriber,
+        *,
+        images: Optional[Sequence[Union[ImageInput, str, Path]]] = None,
+    ) -> str:
+        """Transcribe audio with an adapter, then send the text to Kiro.
+
+        This deliberately does not pretend to call a private Kiro voice
+        endpoint: the verified Kiro API path accepts the resulting text turn.
+        """
+        return self.send(
+            transcribe_audio(audio, transcriber), images=images
+        )
 
     def send_tool_results(self, results: List[ToolResult]) -> str:
         """

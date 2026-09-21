@@ -35,6 +35,15 @@ from .eventstream import (
     encode_message,
     iter_messages,
 )
+from .media import (
+    AudioInput,
+    ImageInput,
+    ImageInputError,
+    image_from_bytes,
+    image_from_data_url,
+    image_from_file,
+)
+from .voice import VoiceInputError, VoiceTranscriber, transcribe_audio
 from .models import (
     AssistantResponseEvent,
     AssistantResponseMessage,
@@ -93,4 +102,13 @@ __all__ = [
     "decode_message",
     "iter_messages",
     "encode_message",
+    "ImageInput",
+    "ImageInputError",
+    "image_from_bytes",
+    "image_from_file",
+    "image_from_data_url",
+    "AudioInput",
+    "VoiceTranscriber",
+    "VoiceInputError",
+    "transcribe_audio",
 ]

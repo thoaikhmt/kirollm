@@ -148,7 +148,56 @@ for event in client.generate_assistant_response(state):
     print(event)
 ```
 
-## How this maps to the Kiro CLI
+## Images and voice input
+
+Images are supported through Kiro's observed `ImageBlock` wire shape. Use the
+built-in helpers instead of hand-building base64 payloads:
+
+```python
+from kiro_llm import ChatSession, KiroLLMClient, image_from_file
+
+chat = ChatSession(KiroLLMClient(), model_id="claude-sonnet-4")
+print(chat.send("What is in this image?", images=[image_from_file("photo.png")]))
+# A file path is also accepted directly by ChatSession.
+print(chat.send("Read this diagram", images=["diagram.jpg"]))
+```
+
+LangChain image blocks using base64 data URLs are supported:
+
+```python
+from kiro_llm.langchain import ChatKiro
+
+llm = ChatKiro(model="claude-sonnet-4")
+message = {
+    "role": "user",
+    "content": [
+        {"type": "text", "text": "Describe this"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}},
+    ],
+}
+print(llm.invoke([message]).content)
+```
+
+Voice input is exposed as a safe adapter rather than an unverified private Kiro
+voice endpoint. The installed CLI contains voice command strings, but the
+currently installed executable does not expose a stable callable voice protocol.
+Transcribe audio with Whisper or another ASR provider and send the transcript
+through Kiro:
+
+```python
+from kiro_llm import AudioInput, ChatSession, KiroLLMClient
+
+class MyTranscriber:
+    def transcribe(self, audio: AudioInput) -> str:
+        return whisper_transcribe(audio.data, audio.mime_type)
+
+chat = ChatSession(KiroLLMClient())
+reply = chat.send_voice(AudioInput(open("question.wav", "rb").read()), MyTranscriber())
+```
+
+No audio bytes are sent to the Kiro text endpoint; the adapter owns audio
+transcription and only the resulting text enters the verified conversation API.
+
 
 The Kiro CLI is a split process: a TUI frontend talks to a Rust agent backend
 over the Agent Client Protocol (ACP, JSON-RPC). The backend uses an AWS
@@ -175,7 +224,9 @@ src/kiro_llm/
   models.py        ConversationState & ChatResponseStream event types
   client.py        KiroLLMClient: endpoints, bearer auth, streaming call
   auth.py          load Kiro's stored token + auto-refresh (SSO-OIDC)
-  chat.py          ChatSession: history + convenience helpers
+  media.py         image file/bytes/data-URL and audio input helpers
+  voice.py         provider-neutral audio transcription adapter
+  chat.py          ChatSession: history + multimodal helpers
   langchain.py     ChatKiro: LangChain BaseChatModel (LangGraph-ready)
 examples/
   basic_stream.py
