@@ -89,9 +89,9 @@ class _FakeSession:
         self.last_body = None
         self.calls = 0
 
-    def post(self, url, headers=None, data=None, stream=None, timeout=None):
+    def post(self, url, headers=None, data=None, json=None, stream=None, timeout=None):
         self.last_headers = headers
-        self.last_body = data
+        self.last_body = data if data is not None else json
         response = self._responses[min(self.calls, len(self._responses) - 1)]
         self.calls += 1
         return response
@@ -344,6 +344,7 @@ def test_cli_provider_parses_token_without_exposing_it(monkeypatch):
 
 
 def test_default_credentials_use_environment_without_cli(monkeypatch):
+    monkeypatch.delenv("KIRO_API_KEY", raising=False)
     monkeypatch.setenv("KIRO_ACCESS_TOKEN", "environment-token")
     monkeypatch.setattr(
         "kiro_llm.auth.KiroCliCredentialProvider",
@@ -373,3 +374,30 @@ def test_api_key_mode_sets_kiro_headers_and_origin():
         payload["conversationState"]["currentMessage"]["userInputMessage"]["origin"]
         == "AI_EDITOR"
     )
+
+
+def test_list_models_parses_server_catalog():
+    payload = {
+        "defaultModel": {"modelId": "claude-sonnet-4"},
+        "models": [
+            {
+                "modelId": "claude-sonnet-4",
+                "modelName": "Claude Sonnet 4",
+                "description": "fast",
+                "supportedInputTypes": ["TEXT", "IMAGE"],
+                "rateMultiplier": 1.0,
+                "tokenLimits": {"maxInputTokens": 200000, "maxOutputTokens": 8192},
+            },
+            {"modelId": "custom-model", "name": "Custom"},
+        ],
+    }
+    response = _FakeResponse(json.dumps(payload).encode(), headers={"Content-Type": "application/json"})
+    session = _FakeSession(response)
+    client = KiroLLMClient(access_token="ksk_test_key", session=session)
+
+    catalog = client.list_models()
+    assert catalog.default_model == "claude-sonnet-4"
+    assert catalog.model_ids == ("claude-sonnet-4", "custom-model")
+    assert catalog.get("claude-sonnet-4").supported_input_types == ("TEXT", "IMAGE")
+    assert session.last_headers["X-Amz-Target"] == "AmazonCodeWhispererService.ListAvailableModels"
+    assert session.last_body == {"origin": "AI_EDITOR"}

@@ -31,27 +31,39 @@ from __future__ import annotations
 
 # pyright: reportPossiblyUnboundVariable=false, reportRedeclaration=false
 
+import asyncio
 import json
+import threading
 import uuid
-from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Union, cast
+from typing import Any, AsyncIterator, Callable, Dict, Iterator, List, Optional, Sequence, Union, cast
 
-from .client import KiroLLMClient
+from .client import KiroApiError, KiroLLMClient
 from .media import ImageInput, image_from_data_url
 from .models import (
     AssistantResponseEvent,
     AssistantResponseMessage,
     ChatTriggerType,
+    ContextUsageEvent,
     ConversationState,
+    InvalidStateEvent,
+    KiroModelCatalog,
+    MetadataEvent,
+    ModelUnavailableEvent,
+    ReasoningEvent,
     ToolResult,
     ToolSpecification,
     ToolUse,
     ToolUseEvent,
+    SupplementaryWebLinksEvent,
     UserInputMessage,
     UserInputMessageContext,
 )
 
 try:
-    from langchain_core.callbacks import CallbackManagerForLLMRun
+    from langchain_core.callbacks import (
+        AsyncCallbackManagerForLLMRun,
+        CallbackManagerForLLMRun,
+    )
     from langchain_core.language_models import LanguageModelInput
     from langchain_core.language_models.chat_models import BaseChatModel
     from langchain_core.messages import (
@@ -128,6 +140,10 @@ if _LANGCHAIN_AVAILABLE:
         def _identifying_params(self) -> Dict[str, Any]:
             return {"model": self.model, "region": self._client.region}
 
+        def list_models(self) -> "KiroModelCatalog":
+            """Discover all models available to this Kiro credential."""
+            return self._client.list_models()
+
         # -- tool binding ----------------------------------------------- #
         def bind_tools(
             self,
@@ -162,7 +178,7 @@ if _LANGCHAIN_AVAILABLE:
 
         # -- core generation -------------------------------------------- #
         def _build_state(self, messages: List[BaseMessage]) -> ConversationState:
-            history, current, current_images, tool_results = _messages_to_kiro(messages)
+            history, current, current_images, tool_results, system_prompt = _messages_to_kiro(messages)
             ctx = UserInputMessageContext(
                 tools=self._bound_tools or None,
                 tool_results=tool_results or None,
@@ -177,6 +193,7 @@ if _LANGCHAIN_AVAILABLE:
                 current_message=current_message,
                 chat_trigger_type=ChatTriggerType.MANUAL,
                 history=history,
+                system_prompt=system_prompt or None,
             )
 
         def _generate(
@@ -190,6 +207,8 @@ if _LANGCHAIN_AVAILABLE:
                 raise NotImplementedError("Kiro does not support stop sequences")
             state = self._build_state(messages)
             text_parts: List[str] = []
+            reasoning_parts: List[str] = []
+            response_metadata: Dict[str, Any] = {}
             tool_calls = _ToolCallAccumulator()
 
             for event in self._client.generate_assistant_response(state):
@@ -197,12 +216,34 @@ if _LANGCHAIN_AVAILABLE:
                     text_parts.append(event.content)
                     if run_manager:
                         run_manager.on_llm_new_token(event.content)
+                elif isinstance(event, ReasoningEvent):
+                    reasoning_parts.append(event.content)
+                elif isinstance(event, MetadataEvent):
+                    response_metadata.update(event.raw)
+                elif isinstance(event, ContextUsageEvent):
+                    response_metadata["context_usage"] = event.raw
+                elif isinstance(event, SupplementaryWebLinksEvent):
+                    response_metadata["supplementary_web_links"] = event.links
+                elif isinstance(event, ModelUnavailableEvent):
+                    raise KiroApiError(event.message, error_type="ModelUnavailable")
                 elif isinstance(event, ToolUseEvent):
                     tool_calls.add(event)
+                elif isinstance(event, InvalidStateEvent):
+                    raise KiroApiError(
+                        event.message or "Kiro returned an invalid conversation state",
+                        error_type=event.reason or "InvalidState",
+                    )
 
+            additional_kwargs = {}
+            if reasoning_parts:
+                additional_kwargs["reasoning_content"] = "".join(reasoning_parts)
+            usage_metadata = _usage_metadata(response_metadata)
             message = AIMessage(
                 content="".join(text_parts),
                 tool_calls=tool_calls.finalize(),
+                additional_kwargs=additional_kwargs,
+                response_metadata=response_metadata,
+                usage_metadata=cast(Any, usage_metadata or None),
             )
             return ChatResult(generations=[ChatGeneration(message=message)])
 
@@ -217,12 +258,35 @@ if _LANGCHAIN_AVAILABLE:
                 raise NotImplementedError("Kiro does not support stop sequences")
             state = self._build_state(messages)
             tool_indexes: Dict[str, int] = {}
+            response_metadata: Dict[str, Any] = {}
+            reasoning_parts: List[str] = []
             for event in self._client.generate_assistant_response(state):
                 if isinstance(event, AssistantResponseEvent):
                     if run_manager:
                         run_manager.on_llm_new_token(event.content)
                     yield ChatGenerationChunk(
                         message=AIMessageChunk(content=event.content)
+                    )
+                elif isinstance(event, ReasoningEvent):
+                    reasoning_parts.append(event.content)
+                    yield ChatGenerationChunk(
+                        message=AIMessageChunk(
+                            content="",
+                            additional_kwargs={"reasoning_content": event.content},
+                        )
+                    )
+                elif isinstance(event, MetadataEvent):
+                    response_metadata.update(event.raw)
+                elif isinstance(event, ContextUsageEvent):
+                    response_metadata["context_usage"] = event.raw
+                elif isinstance(event, SupplementaryWebLinksEvent):
+                    response_metadata["supplementary_web_links"] = event.links
+                elif isinstance(event, ModelUnavailableEvent):
+                    raise KiroApiError(event.message, error_type="ModelUnavailable")
+                elif isinstance(event, InvalidStateEvent):
+                    raise KiroApiError(
+                        event.message or "Kiro returned an invalid conversation state",
+                        error_type=event.reason or "InvalidState",
                     )
                 elif isinstance(event, ToolUseEvent):
                     key = event.tool_use_id or (
@@ -246,6 +310,63 @@ if _LANGCHAIN_AVAILABLE:
                             }],
                         )
                     )
+            if response_metadata or reasoning_parts:
+                additional_kwargs = (
+                    {"reasoning_content": "".join(reasoning_parts)}
+                    if reasoning_parts
+                    else {}
+                )
+                yield ChatGenerationChunk(
+                    message=AIMessageChunk(
+                        content="",
+                        additional_kwargs=additional_kwargs,
+                        response_metadata=response_metadata,
+                        usage_metadata=cast(
+                            Any, _usage_metadata(response_metadata) or None
+                        ),
+                    )
+                )
+
+        async def _agenerate(
+            self,
+            messages: List[BaseMessage],
+            stop: Optional[List[str]] = None,
+            run_manager: Optional["AsyncCallbackManagerForLLMRun"] = None,
+            **kwargs: Any,
+        ) -> "ChatResult":
+            return await asyncio.to_thread(
+                self._generate, messages, stop, None, **kwargs
+            )
+
+        async def _astream(
+            self,
+            messages: List[BaseMessage],
+            stop: Optional[List[str]] = None,
+            run_manager: Optional["AsyncCallbackManagerForLLMRun"] = None,
+            **kwargs: Any,
+        ) -> AsyncIterator["ChatGenerationChunk"]:
+            queue: asyncio.Queue[Any] = asyncio.Queue()
+            sentinel = object()
+            errors: List[BaseException] = []
+            loop = asyncio.get_running_loop()
+
+            def produce() -> None:
+                try:
+                    for chunk in self._stream(messages, stop, None, **kwargs):
+                        loop.call_soon_threadsafe(queue.put_nowait, chunk)
+                except BaseException as exc:
+                    errors.append(exc)
+                finally:
+                    loop.call_soon_threadsafe(queue.put_nowait, sentinel)
+
+            threading.Thread(target=produce, daemon=True).start()
+            while True:
+                item = await queue.get()
+                if item is sentinel:
+                    break
+                yield cast("ChatGenerationChunk", item)
+            if errors:
+                raise errors[0]
 
 else:  # pragma: no cover
 
@@ -270,20 +391,21 @@ def _to_tool_specification(tool: Any) -> ToolSpecification:
 
 
 def _messages_to_kiro(messages: List["BaseMessage"]):
-    """Translate LangChain messages into history, text, images, and tool results."""
+    """Translate LangChain messages into Kiro history and current-turn fields."""
     history: List[Dict[str, Any]] = []
-    system_prefix = ""
+    system_parts: List[str] = []
     tool_results: List[ToolResult] = []
 
     non_system: List["BaseMessage"] = []
     for message in messages:
         if isinstance(message, SystemMessage):
-            system_prefix += _text(message.content) + "\n"
+            system_parts.append(_text(message.content))
         else:
             non_system.append(message)
+    system_prompt = "\n\n".join(part for part in system_parts if part)
 
     if not non_system:
-        return history, system_prefix.strip(), [], tool_results
+        return history, "", [], tool_results, system_prompt
 
     trailing_tool_start = len(non_system)
     while trailing_tool_start > 0 and isinstance(
@@ -309,12 +431,15 @@ def _messages_to_kiro(messages: List["BaseMessage"]):
             )
         current_content, current_images = _text_and_images(last.content)
 
-    for message in prior:
+    index = 0
+    while index < len(prior):
+        message = prior[index]
         if isinstance(message, HumanMessage):
-            text, images = _text_and_images(message.content)
+            content, images = _text_and_images(message.content)
             history.append(
-                UserInputMessage(content=text, images=images or None).to_dict()
+                UserInputMessage(content=content, images=images or None).to_dict()
             )
+            index += 1
         elif isinstance(message, AIMessage):
             tool_uses = _ai_tool_uses(cast(AIMessage, message))
             history.append(
@@ -322,25 +447,24 @@ def _messages_to_kiro(messages: List["BaseMessage"]):
                     content=_text(message.content), tool_uses=tool_uses or None
                 ).to_dict()
             )
+            index += 1
         elif isinstance(message, ToolMessage):
+            results: List[ToolResult] = []
+            while index < len(prior) and isinstance(prior[index], ToolMessage):
+                results.append(
+                    _tool_message_to_result(cast(ToolMessage, prior[index]))
+                )
+                index += 1
             history.append(
                 UserInputMessage(
                     content="",
-                    context=UserInputMessageContext(
-                        tool_results=[
-                            _tool_message_to_result(cast(ToolMessage, message))
-                        ]
-                    ),
+                    context=UserInputMessageContext(tool_results=results),
                 ).to_dict()
             )
         else:
             raise TypeError(f"Unsupported LangChain message type: {type(message).__name__}")
 
-    if system_prefix:
-        prefix = system_prefix.strip()
-        current_content = f"{prefix}\n\n{current_content}" if current_content else prefix
-
-    return history, current_content, current_images, tool_results
+    return history, current_content, current_images, tool_results, system_prompt
 
 
 def _text_and_images(content: Any) -> tuple[str, List[ImageInput]]:
@@ -402,6 +526,29 @@ def _text_and_images(content: Any) -> tuple[str, List[ImageInput]]:
 
 def _text(content: Any) -> str:
     return _text_and_images(content)[0]
+
+
+def _usage_metadata(metadata: Dict[str, Any]) -> Dict[str, int]:
+    usage = metadata.get("usage") or metadata.get("tokenUsage") or metadata
+    if not isinstance(usage, dict):
+        return {}
+    aliases = {
+        "input_tokens": ("input_tokens", "inputTokens", "prompt_tokens"),
+        "output_tokens": ("output_tokens", "outputTokens", "completion_tokens"),
+        "total_tokens": ("total_tokens", "totalTokens"),
+    }
+    result: Dict[str, int] = {}
+    for target, keys in aliases.items():
+        for key in keys:
+            value = usage.get(key)
+            if isinstance(value, (int, float)):
+                result[target] = int(value)
+                break
+    if "total_tokens" not in result and {
+        "input_tokens", "output_tokens"
+    }.issubset(result):
+        result["total_tokens"] = result["input_tokens"] + result["output_tokens"]
+    return result
 
 
 def _ai_tool_uses(message: "AIMessage") -> List[ToolUse]:

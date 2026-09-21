@@ -127,3 +127,54 @@ class AudioInput:
             raise ValueError("Audio data cannot be empty")
         if not self.mime_type.startswith("audio/"):
             raise ValueError("AudioInput mime_type must start with audio/")
+
+
+_SUPPORTED_DOCUMENT_MIME_TYPES = {
+    "application/pdf": "pdf",
+    "text/plain": "txt",
+    "text/markdown": "md",
+    "text/csv": "csv",
+    "text/html": "html",
+}
+
+
+@dataclass(frozen=True)
+class DocumentInput:
+    """A document encoded as an observed Kiro DocumentBlock source."""
+
+    data: bytes
+    mime_type: str
+    name: str
+
+    def __post_init__(self) -> None:
+        if not self.data:
+            raise ValueError("Document data cannot be empty")
+        if not self.name.strip():
+            raise ValueError("Document name cannot be empty")
+        if self.mime_type.lower() not in _SUPPORTED_DOCUMENT_MIME_TYPES:
+            raise ValueError(f"Unsupported document MIME type: {self.mime_type}")
+
+    @property
+    def format(self) -> str:
+        return _SUPPORTED_DOCUMENT_MIME_TYPES[self.mime_type.lower()]
+
+    @classmethod
+    def from_file(
+        cls, path: Union[str, Path], mime_type: Optional[str] = None
+    ) -> "DocumentInput":
+        file_path = Path(path)
+        if not file_path.is_file():
+            raise ValueError(f"Document file does not exist: {file_path}")
+        detected = mime_type or mimetypes.guess_type(file_path.name)[0]
+        if not detected:
+            raise ValueError(
+                f"Could not determine document MIME type for {file_path}; pass mime_type="
+            )
+        return cls(file_path.read_bytes(), detected, file_path.name)
+
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "format": self.format,
+            "source": {"bytes": base64.b64encode(self.data).decode("ascii")},
+        }

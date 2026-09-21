@@ -102,10 +102,10 @@ def test_message_translation_system_and_history():
         AIMessage(content="reply"),
         HumanMessage(content="second"),
     ]
-    history, current, images, tool_results = _messages_to_kiro(msgs)
+    history, current, images, tool_results, system_prompt = _messages_to_kiro(msgs)
     assert len(history) == 2  # first user + assistant reply
-    assert "You are helpful." in current
-    assert "second" in current
+    assert current == "second"
+    assert system_prompt == "You are helpful."
     assert tool_results == []
 
 
@@ -115,7 +115,7 @@ def test_tool_message_becomes_result():
         AIMessage(content="", tool_calls=[{"id": "t1", "name": "f", "args": {}, "type": "tool_call"}]),
         ToolMessage(content="42", tool_call_id="t1"),
     ]
-    history, current, images, tool_results = _messages_to_kiro(msgs)
+    history, current, images, tool_results, system_prompt = _messages_to_kiro(msgs)
     assert len(tool_results) == 1
     assert tool_results[0].tool_use_id == "t1"
 
@@ -146,7 +146,7 @@ def test_parallel_tool_messages_become_one_current_result_turn():
         ToolMessage(content="one", tool_call_id="t1"),
         ToolMessage(content="two", tool_call_id="t2"),
     ]
-    history, current, images, tool_results = _messages_to_kiro(msgs)
+    history, current, images, tool_results, system_prompt = _messages_to_kiro(msgs)
     assert current == ""
     assert [result.tool_use_id for result in tool_results] == ["t1", "t2"]
     assert len(history) == 2
@@ -155,3 +155,59 @@ def test_parallel_tool_messages_become_one_current_result_turn():
 def test_access_token_is_redacted_in_model_repr():
     llm = ChatKiro(access_token="super-secret", region="us-east-1", model="m")
     assert "super-secret" not in repr(llm)
+
+
+def test_parallel_tool_messages_in_history_are_coalesced():
+    msgs = [
+        HumanMessage(content="first"),
+        AIMessage(content="", tool_calls=[
+            {"id": "t1", "name": "a", "args": {}, "type": "tool_call"},
+            {"id": "t2", "name": "b", "args": {}, "type": "tool_call"},
+        ]),
+        ToolMessage(content="one", tool_call_id="t1"),
+        ToolMessage(content="two", tool_call_id="t2"),
+        AIMessage(content="done"),
+        HumanMessage(content="next"),
+    ]
+    history, current, images, tool_results, system_prompt = _messages_to_kiro(msgs)
+    assert current == "next"
+    assert len(history) == 4
+    assert len(history[2]["userInputMessage"]["userInputMessageContext"]["toolResults"]) == 2
+
+
+def test_invoke_preserves_reasoning_and_metadata():
+    body = (
+        _event("reasoningEvent", {"content": "thinking"})
+        + _event("assistantResponseEvent", {"content": "answer"})
+        + _event("metadataEvent", {
+            "requestId": "req-1",
+            "usage": {"inputTokens": 3, "outputTokens": 2},
+        })
+    )
+    result = ChatKiro(client=_client(body), model="m").invoke("hi")
+    assert result.content == "answer"
+    assert result.additional_kwargs["reasoning_content"] == "thinking"
+    assert result.response_metadata["requestId"] == "req-1"
+    assert result.usage_metadata["total_tokens"] == 5
+
+
+def test_invalid_state_event_fails_langchain_generation():
+    body = _event("invalidStateEvent", {"reason": "bad", "message": "invalid"})
+    with pytest.raises(Exception, match="invalid"):
+        ChatKiro(client=_client(body), model="m").invoke("hi")
+
+
+def test_async_stream_is_incremental_api():
+    import asyncio
+
+    body = (
+        _event("assistantResponseEvent", {"content": "a"})
+        + _event("assistantResponseEvent", {"content": "b"})
+    )
+    llm = ChatKiro(client=_client(body), model="m")
+
+    async def collect():
+        return [chunk async for chunk in llm.astream("hi")]
+
+    chunks = asyncio.run(collect())
+    assert "".join(chunk.content for chunk in chunks) == "ab"

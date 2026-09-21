@@ -113,6 +113,34 @@ base `ChatOpenAI` extends), so it works anywhere a LangChain chat model does.
 from kiro_llm.langchain import ChatKiro
 
 llm = ChatKiro(model="claude-sonnet-4")        # auto-auth
+## Model discovery and selection
+
+Model IDs are entitlement- and region-dependent. Discover the catalog instead of
+hard-coding model names:
+
+```python
+from kiro_llm import KiroLLMClient
+
+client = KiroLLMClient()
+catalog = client.list_models()
+print(catalog.model_ids)
+model_id = catalog.default_model or catalog.model_ids[0]
+```
+
+The same discovery method is available on `ChatKiro`:
+
+```python
+from kiro_llm.langchain import ChatKiro
+
+llm = ChatKiro()
+for model in llm.list_models().models:
+    print(model.model_id, model.name, model.supported_input_types)
+```
+
+Discovery calls Kiro's `AmazonCodeWhispererService.ListAvailableModels` operation
+and preserves descriptions, supported input types, rate multipliers, and token
+limits. Pass the selected ID as `ChatKiro(model=model_id)`.
+
 print(llm.invoke("Hello!").content)
 
 for chunk in llm.stream("Count to five"):
