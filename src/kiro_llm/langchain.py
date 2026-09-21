@@ -142,7 +142,7 @@ if _LANGCHAIN_AVAILABLE:
 
         def list_models(self) -> "KiroModelCatalog":
             """Discover all models available to this Kiro credential."""
-            return self._client.list_models()
+            return self._client.list_all_models()
 
         # -- tool binding ----------------------------------------------- #
         def bind_tools(

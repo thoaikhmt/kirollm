@@ -401,3 +401,19 @@ def test_list_models_parses_server_catalog():
     assert catalog.get("claude-sonnet-4").supported_input_types == ("TEXT", "IMAGE")
     assert session.last_headers["X-Amz-Target"] == "AmazonCodeWhispererService.ListAvailableModels"
     assert session.last_body == {"origin": "AI_EDITOR"}
+
+
+def test_list_all_models_follows_next_token():
+    first = _FakeResponse(
+        json.dumps({"models": [{"modelId": "one"}], "nextToken": "page-2"}).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    second = _FakeResponse(
+        json.dumps({"models": [{"modelId": "two"}], "defaultModel": "one"}).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    session = _FakeSession([first, second])
+    client = KiroLLMClient(access_token="ksk_test_key", session=session)
+    catalog = client.list_all_models()
+    assert catalog.model_ids == ("one", "two")
+    assert catalog.default_model == "one"
