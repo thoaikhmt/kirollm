@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kiro-llm"
+version = "0.1.0"
+description = "Python and LangChain client for Kiro's streaming LLM API"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+dependencies = [
+    "requests==2.34.2",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest==9.1.1",
+    "langchain-core==1.6.3",
+    "ruff==0.13.2",
+    "pyright==1.1.406",
+]
+langchain = ["langchain-core==1.6.3"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
