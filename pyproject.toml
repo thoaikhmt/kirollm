@@ -27,3 +27,6 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "integration: opt-in tests that call a live Kiro model",
+]

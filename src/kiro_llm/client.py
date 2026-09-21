@@ -156,6 +156,11 @@ class KiroLLMClient:
 
         self._provider = credential_provider
         self._static_token = access_token
+        self._auth_type = (
+            getattr(credential_provider, "token_type", "BEARER")
+            if credential_provider is not None
+            else ("API_KEY" if access_token and access_token.startswith("ksk_") else "BEARER")
+        )
 
         # Region / profile_arn: explicit args win, else inherit from the provider.
         if region is None:
@@ -227,6 +232,9 @@ class KiroLLMClient:
             "Accept": "application/vnd.amazon.eventstream",
             "x-kiro-attempt": str(attempt),
         }
+        if self._auth_type == "API_KEY":
+            headers["tokentype"] = "API_KEY"
+            headers["x-amzn-codewhisperer-optout"] = "true"
         # Header names observed in the Kiro CLI binary. A CLI-backed provider
         # learns the profile ARN only after its first token-helper invocation.
         profile_arn = self.profile_arn
@@ -236,11 +244,17 @@ class KiroLLMClient:
             headers["x-amzn-kiro-profile-arn"] = profile_arn
         if self.agent_mode:
             headers["x-amzn-kiro-agent-mode"] = self.agent_mode
+        elif self._auth_type == "API_KEY":
+            headers["x-amzn-kiro-agent-mode"] = "vibe"
         return headers
 
-    @staticmethod
-    def _build_body(conversation_state: ConversationState) -> Dict[str, Any]:
-        return {"conversationState": conversation_state.to_dict()}
+    def _build_body(self, conversation_state: ConversationState) -> Dict[str, Any]:
+        body = {"conversationState": conversation_state.to_dict()}
+        if self._auth_type == "API_KEY":
+            body["conversationState"]["currentMessage"]["userInputMessage"][
+                "origin"
+            ] = "AI_EDITOR"
+        return body
 
     # ------------------------------------------------------------------ #
     # The streaming call

@@ -67,6 +67,9 @@ class CredentialProvider(Protocol):
     @property
     def profile_arn(self) -> Optional[str]: ...
 
+    @property
+    def token_type(self) -> str: ...
+
     def get_access_token(self, force_refresh: bool = False) -> str: ...
 
 
@@ -192,11 +195,13 @@ class KiroCredentialProvider:
         store: Optional[SecretStore] = None,
         token_key: str = TOKEN_KEY_IDC,
         registration: Optional[Dict[str, Any]] = None,
+        token_type: str = "BEARER",
     ):
         self._token = token
         self._store = store
         self._token_key = token_key
         self._registration = registration or {}
+        self._token_type = token_type
         self._lock = threading.Lock()
 
     # ---- construction -------------------------------------------------- #
@@ -248,6 +253,7 @@ class KiroCredentialProvider:
         profile_arn: Optional[str] = None,
         client_id: Optional[str] = None,
         client_secret: Optional[str] = None,
+        token_type: str = "BEARER",
     ) -> "KiroCredentialProvider":
         """Build a provider from explicit values (no secret store on disk)."""
         token = Token(
@@ -259,7 +265,7 @@ class KiroCredentialProvider:
             client_id=client_id,
             client_secret=client_secret,
         )
-        return cls(token, store=None)
+        return cls(token, store=None, token_type=token_type)
 
     # ---- accessors ----------------------------------------------------- #
     @property
@@ -269,6 +275,10 @@ class KiroCredentialProvider:
     @property
     def profile_arn(self) -> Optional[str]:
         return self._token.profile_arn
+
+    @property
+    def token_type(self) -> str:
+        return self._token_type
 
     def get_access_token(self, force_refresh: bool = False) -> str:
         """Return a valid access token, refreshing if necessary."""
@@ -405,6 +415,10 @@ class KiroCliCredentialProvider:
     def profile_arn(self) -> Optional[str]:
         return self._profile_arn
 
+    @property
+    def token_type(self) -> str:
+        return "BEARER"
+
     def get_access_token(self, force_refresh: bool = False) -> str:
         with self._lock:
             if force_refresh or self._token is None or self._token.is_expired():
@@ -459,7 +473,10 @@ def load_default_credentials() -> CredentialProvider:
     provider logic.
     """
 
-    explicit = os.environ.get("KIRO_ACCESS_TOKEN") or os.environ.get("KIRO_API_KEY")
-    if explicit:
-        return KiroCredentialProvider.from_token(explicit)
+    api_key = os.environ.get("KIRO_API_KEY")
+    if api_key:
+        return KiroCredentialProvider.from_token(api_key, token_type="API_KEY")
+    access_token = os.environ.get("KIRO_ACCESS_TOKEN")
+    if access_token:
+        return KiroCredentialProvider.from_token(access_token, token_type="BEARER")
     return KiroCredentialProvider.load(token_key=TOKEN_KEY_IDC)
