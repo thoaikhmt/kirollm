@@ -36,6 +36,7 @@ import uuid
 from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Union, cast
 
 from .client import KiroLLMClient
+from .media import ImageInput, image_from_data_url
 from .models import (
     AssistantResponseEvent,
     AssistantResponseMessage,
@@ -161,7 +162,7 @@ if _LANGCHAIN_AVAILABLE:
 
         # -- core generation -------------------------------------------- #
         def _build_state(self, messages: List[BaseMessage]) -> ConversationState:
-            history, current, tool_results = _messages_to_kiro(messages)
+            history, current, current_images, tool_results = _messages_to_kiro(messages)
             ctx = UserInputMessageContext(
                 tools=self._bound_tools or None,
                 tool_results=tool_results or None,
@@ -169,6 +170,7 @@ if _LANGCHAIN_AVAILABLE:
             current_message = UserInputMessage(
                 content=current,
                 model_id=self.model,
+                images=current_images or None,
                 context=ctx if (self._bound_tools or tool_results) else None,
             )
             return ConversationState(
@@ -268,13 +270,7 @@ def _to_tool_specification(tool: Any) -> ToolSpecification:
 
 
 def _messages_to_kiro(messages: List["BaseMessage"]):
-    """
-    Translate LangChain messages into (history, current_content, tool_results).
-
-    * SystemMessage is prepended to the first user turn's content.
-    * The trailing message determines the "current" turn.
-    * ToolMessages become Kiro ToolResults on the current turn.
-    """
+    """Translate LangChain messages into history, text, images, and tool results."""
     history: List[Dict[str, Any]] = []
     system_prefix = ""
     tool_results: List[ToolResult] = []
@@ -287,7 +283,7 @@ def _messages_to_kiro(messages: List["BaseMessage"]):
             non_system.append(message)
 
     if not non_system:
-        return history, system_prefix.strip(), tool_results
+        return history, system_prefix.strip(), [], tool_results
 
     trailing_tool_start = len(non_system)
     while trailing_tool_start > 0 and isinstance(
@@ -295,6 +291,7 @@ def _messages_to_kiro(messages: List["BaseMessage"]):
     ):
         trailing_tool_start -= 1
 
+    current_images: List[ImageInput] = []
     if trailing_tool_start < len(non_system):
         prior = non_system[:trailing_tool_start]
         trailing_tools = non_system[trailing_tool_start:]
@@ -310,11 +307,14 @@ def _messages_to_kiro(messages: List["BaseMessage"]):
             raise ValueError(
                 "The final LangChain message must be HumanMessage or ToolMessage"
             )
-        current_content = _text(last.content)
+        current_content, current_images = _text_and_images(last.content)
 
     for message in prior:
         if isinstance(message, HumanMessage):
-            history.append(UserInputMessage(content=_text(message.content)).to_dict())
+            text, images = _text_and_images(message.content)
+            history.append(
+                UserInputMessage(content=text, images=images or None).to_dict()
+            )
         elif isinstance(message, AIMessage):
             tool_uses = _ai_tool_uses(cast(AIMessage, message))
             history.append(
@@ -340,21 +340,68 @@ def _messages_to_kiro(messages: List["BaseMessage"]):
         prefix = system_prefix.strip()
         current_content = f"{prefix}\n\n{current_content}" if current_content else prefix
 
-    return history, current_content, tool_results
+    return history, current_content, current_images, tool_results
+
+
+def _text_and_images(content: Any) -> tuple[str, List[ImageInput]]:
+    if isinstance(content, str):
+        return content, []
+    if not isinstance(content, list):
+        return str(content), []
+
+    text_parts: List[str] = []
+    images: List[ImageInput] = []
+    for block in content:
+        if isinstance(block, str):
+            text_parts.append(block)
+            continue
+        if not isinstance(block, dict):
+            continue
+        block_type = block.get("type")
+        if block_type == "text":
+            text_parts.append(str(block.get("text", "")))
+            continue
+        if block_type == "image_url":
+            image_url = block.get("image_url")
+            url = image_url.get("url") if isinstance(image_url, dict) else image_url
+            if not isinstance(url, str) or not url.startswith("data:"):
+                raise ValueError(
+                    "Kiro image input requires a base64 data URL; remote image URLs "
+                    "must be downloaded by the caller first"
+                )
+            images.append(image_from_data_url(url))
+            continue
+        if block_type == "image":
+            source = block.get("source", block)
+            if isinstance(source, dict):
+                data = source.get("data") or source.get("bytes")
+                mime_type = source.get("media_type") or source.get("mime_type")
+                if isinstance(data, str) and isinstance(mime_type, str):
+                    images.append(
+                        ImageInput.from_data_url(
+                            f"data:{mime_type};base64,{data}"
+                        )
+                    )
+                    continue
+            data = block.get("data")
+            mime_type = block.get("mimeType") or block.get("mime_type")
+            if isinstance(data, str) and isinstance(mime_type, str):
+                images.append(
+                    ImageInput.from_data_url(
+                        f"data:{mime_type};base64,{data}"
+                    )
+                )
+                continue
+        # Preserve unknown structured blocks as text rather than silently
+        # dropping user content.
+        if block_type:
+            text_parts.append(str(block))
+
+    return "".join(text_parts), images
 
 
 def _text(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for c in content:
-            if isinstance(c, dict) and c.get("type") == "text":
-                parts.append(c.get("text", ""))
-            elif isinstance(c, str):
-                parts.append(c)
-        return "".join(parts)
-    return str(content)
+    return _text_and_images(content)[0]
 
 
 def _ai_tool_uses(message: "AIMessage") -> List[ToolUse]:

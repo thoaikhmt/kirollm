@@ -102,7 +102,7 @@ def test_message_translation_system_and_history():
         AIMessage(content="reply"),
         HumanMessage(content="second"),
     ]
-    history, current, tool_results = _messages_to_kiro(msgs)
+    history, current, images, tool_results = _messages_to_kiro(msgs)
     assert len(history) == 2  # first user + assistant reply
     assert "You are helpful." in current
     assert "second" in current
@@ -115,7 +115,7 @@ def test_tool_message_becomes_result():
         AIMessage(content="", tool_calls=[{"id": "t1", "name": "f", "args": {}, "type": "tool_call"}]),
         ToolMessage(content="42", tool_call_id="t1"),
     ]
-    history, current, tool_results = _messages_to_kiro(msgs)
+    history, current, images, tool_results = _messages_to_kiro(msgs)
     assert len(tool_results) == 1
     assert tool_results[0].tool_use_id == "t1"
 
@@ -146,7 +146,7 @@ def test_parallel_tool_messages_become_one_current_result_turn():
         ToolMessage(content="one", tool_call_id="t1"),
         ToolMessage(content="two", tool_call_id="t2"),
     ]
-    history, current, tool_results = _messages_to_kiro(msgs)
+    history, current, images, tool_results = _messages_to_kiro(msgs)
     assert current == ""
     assert [result.tool_use_id for result in tool_results] == ["t1", "t2"]
     assert len(history) == 2

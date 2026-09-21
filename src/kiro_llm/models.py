@@ -16,7 +16,9 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Sequence, Union
+
+from .media import ImageInput
 
 
 class ChatTriggerType(str, Enum):
@@ -114,7 +116,7 @@ class UserInputMessage:
     origin: str = "CLI"
     user_intent: Optional[UserIntent] = None
     context: Optional[UserInputMessageContext] = None
-    images: Optional[List[Dict[str, Any]]] = None
+    images: Optional[Sequence[Union[ImageInput, Dict[str, Any]]]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         msg: Dict[str, Any] = {"content": self.content, "origin": self.origin}
@@ -123,7 +125,10 @@ class UserInputMessage:
         if self.user_intent:
             msg["userIntent"] = self.user_intent.value
         if self.images:
-            msg["images"] = self.images
+            msg["images"] = [
+                image.to_dict() if isinstance(image, ImageInput) else image
+                for image in self.images
+            ]
         ctx = self.context.to_dict() if self.context else {}
         if ctx:
             msg["userInputMessageContext"] = ctx
