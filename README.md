@@ -1,5 +1,11 @@
 # kiro-llm
 
+
+Repository: [github.com/thoaikhmt/kiro-llm](https://github.com/thoaikhmt/kiro-llm)
+
+The repository and distribution name use `kiro-llm`. The Python import package
+intentionally remains `kiro_llm`, because hyphens are not valid in Python import
+identifiers.
 A Python and LangChain client for the streaming Kiro model API observed in the
 installed Kiro CLI.
 
@@ -42,25 +48,28 @@ pip install -e ".[test]"
 
 ## Authentication
 
-By default, `KiroLLMClient()` invokes Kiro's own local token helper. The installed
-CLI therefore remains responsible for Builder ID, social, external-IdP, and API
-key refresh behavior. Credential values are held in memory and never logged by
-this library.
+`kiro-cli` is **not required**. By default, `KiroLLMClient()` uses the first
+available option:
+
+1. `KIRO_ACCESS_TOKEN` or `KIRO_API_KEY` environment variable.
+2. The direct Kiro `auth_kv` SQLite store at
+   `~/.local/share/kiro-cli/data.sqlite3` for IdC credentials, including direct
+   SSO-OIDC refresh.
 
 ```python
 from kiro_llm import KiroLLMClient
 
-client = KiroLLMClient()                 # default Kiro CLI helper
-client = KiroLLMClient.from_kiro_cli()   # explicit equivalent
+client = KiroLLMClient()                    # env or direct SQLite auth
+client = KiroLLMClient.from_kiro_login()    # explicit direct SQLite auth
 
 # Explicit bearer token (no refresh metadata):
 client = KiroLLMClient(access_token="<bearer-token>", region="us-east-1")
 ```
 
-`KIRO_ACCESS_TOKEN` or `KIRO_API_KEY` can supply an explicit environment
-credential. For older installations, `KiroCredentialProvider.load()` reads the
-local `auth_kv` SQLite table; direct automatic refresh there supports IdC tokens
-only. Prefer the CLI helper for other authentication providers.
+`KiroLLMClient.from_kiro_cli()` remains an optional adapter for installations
+that already use Kiro CLI-specific social, external-IdP, or API-key sessions.
+The library does not require the executable for normal environment or IdC
+SQLite authentication.
 
 ## Usage
 

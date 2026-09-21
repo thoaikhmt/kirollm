@@ -7,9 +7,8 @@ Usage:
     export KIRO_MODEL_ID="claude-sonnet-4"        # optional
     python examples/basic_stream.py "Write a haiku about event streams"
 
-The bearer token is the same SSO/IdC access token the Kiro CLI stores after
-`kiro-cli login`. This library does NOT perform the OAuth login flow; supply a
-token you already have.
+The library can use a supplied bearer token or its direct local IdC credential
+store; it does not require the Kiro CLI executable.
 """
 
 import os
@@ -22,8 +21,8 @@ def main() -> int:
     prompt = " ".join(sys.argv[1:]) or "Say hello in one sentence."
 
     token = os.environ.get("KIRO_ACCESS_TOKEN")
-    # If KIRO_ACCESS_TOKEN is set, use it; otherwise auto-load the Kiro CLI's
-    # stored login token and refresh it automatically.
+    # If KIRO_ACCESS_TOKEN is set, use it; otherwise read the direct local
+    # IdC credential store and refresh through SSO-OIDC without kiro-cli.
     if token:
         client = KiroLLMClient(
             access_token=token,

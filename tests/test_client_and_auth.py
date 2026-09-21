@@ -14,7 +14,12 @@ from kiro_llm import (
     UserInputMessage,
     UserInputMessageContext,
 )
-from kiro_llm.auth import KiroCliCredentialProvider, KiroCredentialProvider, SecretStore
+from kiro_llm.auth import (
+    KiroCliCredentialProvider,
+    KiroCredentialProvider,
+    SecretStore,
+    load_default_credentials,
+)
 from kiro_llm.eventstream import encode_message
 
 
@@ -336,3 +341,13 @@ def test_cli_provider_parses_token_without_exposing_it(monkeypatch):
     assert provider.get_access_token() == "secret-token"
     assert provider.region == "eu-central-1"
     assert provider.profile_arn == "arn:example"
+
+
+def test_default_credentials_use_environment_without_cli(monkeypatch):
+    monkeypatch.setenv("KIRO_ACCESS_TOKEN", "environment-token")
+    monkeypatch.setattr(
+        "kiro_llm.auth.KiroCliCredentialProvider",
+        lambda: pytest.fail("default auth must not instantiate kiro-cli provider"),
+    )
+    provider = load_default_credentials()
+    assert provider.get_access_token() == "environment-token"

@@ -450,13 +450,16 @@ class KiroCliCredentialProvider:
 
 
 def load_default_credentials() -> CredentialProvider:
-    """Resolve credentials without exposing secrets.
+    """Resolve credentials without requiring the Kiro CLI executable.
 
-    Explicit environment credentials win. Otherwise delegate to the installed
-    Kiro CLI, which owns all provider-specific refresh behavior.
+    Explicit environment credentials win. Otherwise the provider reads the
+    local Kiro ``auth_kv`` SQLite store and directly refreshes IdC credentials
+    through SSO-OIDC. ``KiroCliCredentialProvider`` remains available explicitly
+    for social/external-IdP/API-key sessions that require the CLI's private
+    provider logic.
     """
 
     explicit = os.environ.get("KIRO_ACCESS_TOKEN") or os.environ.get("KIRO_API_KEY")
     if explicit:
         return KiroCredentialProvider.from_token(explicit)
-    return KiroCliCredentialProvider()
+    return KiroCredentialProvider.load(token_key=TOKEN_KEY_IDC)

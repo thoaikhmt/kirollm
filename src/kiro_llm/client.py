@@ -146,8 +146,8 @@ class KiroLLMClient:
         * ``access_token=`` - use a bearer token you already have.
         * ``credential_provider=`` - a :class:`KiroCredentialProvider` that loads
           and auto-refreshes a token (see :meth:`from_kiro_login`).
-        * neither - the client loads the Kiro CLI's stored token automatically
-          from its on-disk secret store and refreshes it as needed.
+        * neither - the client reads the local Kiro SQLite credential store or
+          environment credentials; installing kiro-cli is not required.
         """
         if credential_provider is None and access_token is None:
             credential_provider = load_default_credentials()
@@ -197,8 +197,9 @@ class KiroLLMClient:
     ) -> "KiroLLMClient":
         """Load the legacy local SQLite credential store directly.
 
-        Prefer :meth:`from_kiro_cli`, which supports every Kiro authentication
-        provider. This fallback can directly refresh IdC credentials only.
+        This path does not require the Kiro CLI. Direct automatic refresh there
+        supports IdC credentials; use :meth:`from_kiro_cli` only when you
+        explicitly want the CLI's provider-specific refresh behavior.
         """
         from .auth import DEFAULT_DB_PATH
 
