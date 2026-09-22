@@ -17,10 +17,17 @@ dependencies = [
 test = [
     "pytest==9.1.1",
     "langchain-core==1.6.3",
+    "langgraph==1.0.10",
+    "langgraph-prebuilt==1.0.8",
     "ruff==0.13.2",
     "pyright==1.1.406",
 ]
 langchain = ["langchain-core==1.6.3"]
+langgraph = [
+    "langchain-core==1.6.3",
+    "langgraph==1.0.10",
+    "langgraph-prebuilt==1.0.8",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
