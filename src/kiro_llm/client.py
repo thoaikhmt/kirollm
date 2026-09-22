@@ -400,11 +400,19 @@ class KiroLLMClient:
         )
 
     def _build_body(self, conversation_state: ConversationState) -> Dict[str, Any]:
-        body = {"conversationState": conversation_state.to_dict()}
+        conversation = conversation_state.to_dict()
+        system_prompt = conversation.pop("systemPrompt", None)
+        user_message = conversation["currentMessage"]["userInputMessage"]
+        body: Dict[str, Any] = {"conversationState": conversation}
         if self._auth_type == "API_KEY":
-            body["conversationState"]["currentMessage"]["userInputMessage"][
-                "origin"
-            ] = "AI_EDITOR"
+            user_message["origin"] = "AI_EDITOR"
+            if system_prompt:
+                content = user_message.get("content", "")
+                user_message["content"] = (
+                    f"{system_prompt}\n\n{content}" if content else system_prompt
+                )
+        elif system_prompt:
+            body["systemPrompt"] = system_prompt
         return body
 
     # ------------------------------------------------------------------ #

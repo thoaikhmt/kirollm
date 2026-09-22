@@ -35,7 +35,19 @@ import asyncio
 import json
 import threading
 import uuid
-from typing import Any, AsyncIterator, Callable, Dict, Iterator, List, Optional, Sequence, Union, cast
+from typing import (
+    Any,
+    AsyncIterator,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Literal,
+    Optional,
+    Sequence,
+    Union,
+    cast,
+)
 
 from .client import KiroApiError, KiroLLMClient
 from .media import ImageInput, image_from_data_url
@@ -110,6 +122,9 @@ if _LANGCHAIN_AVAILABLE:
 
         _client: KiroLLMClient = PrivateAttr()
         _bound_tools: List[ToolSpecification] = PrivateAttr(default_factory=list)
+        _tool_choice: Optional[str] = PrivateAttr(default=None)
+        _tool_strict: Optional[bool] = PrivateAttr(default=None)
+        _parallel_tool_calls: Optional[bool] = PrivateAttr(default=None)
 
         def __init__(self, client: Optional[KiroLLMClient] = None, **kwargs: Any):
             _require_langchain()
@@ -130,6 +145,9 @@ if _LANGCHAIN_AVAILABLE:
                 )
             self._client = client
             self._bound_tools = []
+            self._tool_choice = None
+            self._tool_strict = None
+            self._parallel_tool_calls = None
 
         # -- LangChain plumbing ----------------------------------------- #
         @property
@@ -151,18 +169,32 @@ if _LANGCHAIN_AVAILABLE:
                 Union[Dict[str, Any], type, Callable[..., Any], "BaseTool"]
             ],
             *,
-            tool_choice: Optional[str] = None,
+            tool_choice: Optional[Union[Dict[str, Any], str, bool]] = None,
+            strict: Optional[bool] = None,
+            parallel_tool_calls: Optional[bool] = None,
+            response_format: Optional[Union[Dict[str, Any], type]] = None,
             **kwargs: Any,
         ) -> "Runnable[LanguageModelInput, AIMessage]":
-            if tool_choice not in (None, "auto"):
-                raise NotImplementedError(
-                    "Kiro does not expose a portable tool_choice control"
+            """Bind tools using the common ChatOpenAI call signature.
+
+            Kiro does not expose native tool-choice flags, so required/named
+            choices are reinforced through the system prompt and validated on
+            the returned tool calls. ``strict`` is enforced by structured-output
+            parsers, while ``parallel_tool_calls=False`` is enforced locally.
+            """
+            if response_format is not None:
+                raise ValueError(
+                    "Kiro does not support bind_tools(response_format=...); use "
+                    "with_structured_output(..., method='function_calling')"
                 )
+            internal_format = kwargs.pop("ls_structured_output_format", None)
             if kwargs:
-                raise TypeError(
-                    f"Unsupported bind_tools options: {', '.join(sorted(kwargs))}"
-                )
-            specs = [_to_tool_specification(t) for t in tools]
+                raise ValueError(f"Received unsupported arguments {kwargs}")
+
+            specs = [_to_tool_specification(tool, strict=strict) for tool in tools]
+            normalized_choice = _normalize_tool_choice(
+                tool_choice, [spec.name for spec in specs]
+            )
             new = ChatKiro(
                 client=self._client,
                 model=self.model,
@@ -173,8 +205,49 @@ if _LANGCHAIN_AVAILABLE:
                 endpoint_override=self.endpoint_override,
                 timeout=self.timeout,
             )
-            new._bound_tools = list(specs)  # pyright: ignore[reportAttributeAccessIssue]
+            new._bound_tools = (  # pyright: ignore[reportAttributeAccessIssue]
+                [] if normalized_choice == "none" else list(specs)
+            )
+            new._tool_choice = normalized_choice  # pyright: ignore[reportAttributeAccessIssue]
+            new._tool_strict = strict  # pyright: ignore[reportAttributeAccessIssue]
+            new._parallel_tool_calls = parallel_tool_calls  # pyright: ignore[reportAttributeAccessIssue]
+            _ = internal_format  # LangChain tracing metadata; no Kiro wire equivalent.
             return new  # pyright: ignore[reportReturnType]
+
+        def with_structured_output(
+            self,
+            schema: Optional[Union[Dict[str, Any], type]] = None,
+            *,
+            method: Literal["function_calling", "json_mode", "json_schema"] = "function_calling",
+            include_raw: bool = False,
+            strict: Optional[bool] = None,
+            tools: Optional[list] = None,
+            **kwargs: Any,
+        ) -> "Runnable[LanguageModelInput, Any]":
+            """Return Pydantic or dict output using Kiro function calling.
+
+            This mirrors common ``ChatOpenAI.with_structured_output`` invocation
+            patterns. Kiro currently supports only ``function_calling``; native
+            OpenAI JSON modes are rejected explicitly.
+            """
+            if schema is None:
+                raise ValueError("schema is required for Kiro structured output")
+            if method != "function_calling":
+                raise ValueError(
+                    "Kiro structured output supports only method='function_calling'"
+                )
+            if tools:
+                raise ValueError(
+                    "Additional tools are not supported with Kiro structured output"
+                )
+            if kwargs:
+                raise ValueError(f"Received unsupported arguments {kwargs}")
+            return super().with_structured_output(
+                schema,
+                include_raw=include_raw,
+                method=method,
+                strict=strict,
+            )
 
         # -- core generation -------------------------------------------- #
         def _build_state(self, messages: List[BaseMessage]) -> ConversationState:
@@ -189,6 +262,22 @@ if _LANGCHAIN_AVAILABLE:
                 images=current_images or None,
                 context=ctx if (self._bound_tools or tool_results) else None,
             )
+            if self._tool_choice == "required":
+                directive = (
+                    "You must respond by calling at least one of the provided tools. "
+                    "Do not answer directly."
+                )
+                system_prompt = "\n\n".join(
+                    part for part in (system_prompt, directive) if part
+                )
+            elif self._tool_choice not in (None, "auto", "none"):
+                directive = (
+                    f"You must respond by calling the `{self._tool_choice}` tool. "
+                    "Do not answer directly or call another tool."
+                )
+                system_prompt = "\n\n".join(
+                    part for part in (system_prompt, directive) if part
+                )
             return ConversationState(
                 current_message=current_message,
                 chat_trigger_type=ChatTriggerType.MANUAL,
@@ -238,9 +327,15 @@ if _LANGCHAIN_AVAILABLE:
             if reasoning_parts:
                 additional_kwargs["reasoning_content"] = "".join(reasoning_parts)
             usage_metadata = _usage_metadata(response_metadata)
+            parsed_tool_calls = tool_calls.finalize()
+            _validate_tool_calls(
+                parsed_tool_calls,
+                tool_choice=self._tool_choice,
+                parallel_tool_calls=self._parallel_tool_calls,
+            )
             message = AIMessage(
                 content="".join(text_parts),
-                tool_calls=tool_calls.finalize(),
+                tool_calls=parsed_tool_calls,
                 additional_kwargs=additional_kwargs,
                 response_metadata=response_metadata,
                 usage_metadata=cast(Any, usage_metadata or None),
@@ -260,6 +355,7 @@ if _LANGCHAIN_AVAILABLE:
             tool_indexes: Dict[str, int] = {}
             response_metadata: Dict[str, Any] = {}
             reasoning_parts: List[str] = []
+            streamed_tools: Dict[str, str] = {}
             for event in self._client.generate_assistant_response(state):
                 if isinstance(event, AssistantResponseEvent):
                     if run_manager:
@@ -294,6 +390,10 @@ if _LANGCHAIN_AVAILABLE:
                     )
                     if key not in tool_indexes:
                         tool_indexes[key] = len(tool_indexes)
+                    if key not in streamed_tools:
+                        streamed_tools[key] = event.name or ""
+                    elif event.name:
+                        streamed_tools[key] = event.name
                     if isinstance(event.input, dict):
                         arguments = json.dumps(event.input, separators=(",", ":"))
                     else:
@@ -310,6 +410,14 @@ if _LANGCHAIN_AVAILABLE:
                             }],
                         )
                     )
+            _validate_tool_calls(
+                [
+                    {"id": tool_id, "name": name}
+                    for tool_id, name in streamed_tools.items()
+                ],
+                tool_choice=self._tool_choice,
+                parallel_tool_calls=self._parallel_tool_calls,
+            )
             if response_metadata or reasoning_parts:
                 additional_kwargs = (
                     {"reasoning_content": "".join(reasoning_parts)}
@@ -379,9 +487,68 @@ else:  # pragma: no cover
 # Helpers
 # --------------------------------------------------------------------------- #
 
-def _to_tool_specification(tool: Any) -> ToolSpecification:
+def _validate_tool_calls(
+    calls: Sequence[Dict[str, Any]],
+    *,
+    tool_choice: Optional[str],
+    parallel_tool_calls: Optional[bool],
+) -> None:
+    if parallel_tool_calls is False and len(calls) > 1:
+        raise KiroApiError(
+            "Kiro returned parallel tool calls while parallel_tool_calls=False",
+            error_type="ParallelToolCalls",
+        )
+    if tool_choice == "required" and not calls:
+        raise KiroApiError(
+            "Kiro did not return a required tool call",
+            error_type="RequiredToolCallMissing",
+        )
+    if tool_choice not in (None, "auto", "none", "required"):
+        if len(calls) != 1 or calls[0].get("name") != tool_choice:
+            raise KiroApiError(
+                f"Kiro did not return the required {tool_choice!r} tool call",
+                error_type="NamedToolCallMismatch",
+            )
+
+
+def _normalize_tool_choice(
+    tool_choice: Optional[Union[Dict[str, Any], str, bool]],
+    tool_names: Sequence[str],
+) -> Optional[str]:
+    if tool_choice is None or tool_choice is False:
+        return None
+    if tool_choice is True:
+        return "required"
+    if isinstance(tool_choice, dict):
+        function = tool_choice.get("function")
+        name = function.get("name") if isinstance(function, dict) else None
+        if not isinstance(name, str) or not name:
+            raise ValueError(
+                "tool_choice dict must be {'type': 'function', "
+                "'function': {'name': '<tool>'}}"
+            )
+        if name not in tool_names:
+            raise ValueError(f"tool_choice refers to unknown tool {name!r}")
+        return name
+    if not isinstance(tool_choice, str):
+        raise TypeError("tool_choice must be a dict, string, bool, or None")
+    normalized = tool_choice.strip()
+    lowered = normalized.lower()
+    if lowered in ("any", "required"):
+        return "required"
+    if lowered in ("auto", "none"):
+        return lowered
+    if normalized not in tool_names:
+        raise ValueError(f"tool_choice refers to unknown tool {normalized!r}")
+    return normalized
+
+
+def _to_tool_specification(
+    tool: Any, *, strict: Optional[bool] = None
+) -> ToolSpecification:
     """Convert a LangChain tool / pydantic / dict into a Kiro ToolSpecification."""
-    openai_tool = convert_to_openai_tool(tool)
+    conversion_kwargs = {"strict": strict} if strict is not None else {}
+    openai_tool = convert_to_openai_tool(tool, **conversion_kwargs)
     fn = openai_tool["function"]
     return ToolSpecification(
         name=fn["name"],

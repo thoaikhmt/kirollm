@@ -211,3 +211,326 @@ def test_async_stream_is_incremental_api():
 
     chunks = asyncio.run(collect())
     assert "".join(chunk.content for chunk in chunks) == "ab"
+
+
+def test_with_structured_output_pydantic_returns_model():
+    from pydantic import BaseModel
+
+    class Answer(BaseModel):
+        """A concise answer with confidence."""
+
+        answer: str
+        confidence: float
+
+    body = _event(
+        "toolUseEvent",
+        {
+            "toolUseId": "structured-1",
+            "name": "Answer",
+            "input": '{"answer":"yes","confidence":0.9}',
+            "stop": True,
+        },
+    )
+    runnable = ChatKiro(client=_client(body)).with_structured_output(Answer)
+    result = runnable.invoke("Return an answer")
+    assert isinstance(result, Answer)
+    assert result.answer == "yes"
+    assert result.confidence == 0.9
+
+
+def test_with_structured_output_include_raw_matches_chatopenai_shape():
+    from pydantic import BaseModel
+
+    class Answer(BaseModel):
+        answer: str
+
+    body = _event(
+        "toolUseEvent",
+        {
+            "toolUseId": "structured-2",
+            "name": "Answer",
+            "input": '{"answer":"ok"}',
+            "stop": True,
+        },
+    )
+    result = ChatKiro(client=_client(body)).with_structured_output(
+        Answer, include_raw=True, strict=True
+    ).invoke("Return structured output")
+    assert set(result) == {"raw", "parsed", "parsing_error"}
+    assert isinstance(result["raw"], AIMessage)
+    assert result["parsed"] == Answer(answer="ok")
+    assert result["parsing_error"] is None
+
+
+def test_with_structured_output_typeddict_returns_dict():
+    from typing import TypedDict
+
+    class AnswerDict(TypedDict):
+        answer: str
+        count: int
+
+    body = _event(
+        "toolUseEvent",
+        {
+            "toolUseId": "structured-3",
+            "name": "AnswerDict",
+            "input": '{"answer":"ok","count":2}',
+            "stop": True,
+        },
+    )
+    result = ChatKiro(client=_client(body)).with_structured_output(
+        AnswerDict, method="function_calling"
+    ).invoke("Return a dict")
+    assert result == {"answer": "ok", "count": 2}
+
+
+def test_with_structured_output_json_schema_returns_dict():
+    schema = {
+        "title": "WeatherAnswer",
+        "description": "Weather response",
+        "type": "object",
+        "properties": {"city": {"type": "string"}},
+        "required": ["city"],
+    }
+    body = _event(
+        "toolUseEvent",
+        {
+            "toolUseId": "structured-4",
+            "name": "WeatherAnswer",
+            "input": '{"city":"Paris"}',
+            "stop": True,
+        },
+    )
+    result = ChatKiro(client=_client(body)).with_structured_output(schema).invoke(
+        "Return weather"
+    )
+    assert result == {"city": "Paris"}
+
+
+@pytest.mark.parametrize(
+    "tool_choice",
+    [
+        None,
+        False,
+        "auto",
+        "any",
+        "required",
+        True,
+        "get_weather",
+        {"type": "function", "function": {"name": "get_weather"}},
+    ],
+)
+def test_bind_tools_accepts_chatopenai_tool_choice_forms(tool_choice):
+    def get_weather(city: str) -> str:
+        """Get weather."""
+        return city
+
+    bound = ChatKiro(client=_client(b"")).bind_tools(
+        [get_weather],
+        tool_choice=tool_choice,
+        strict=True,
+        parallel_tool_calls=False,
+        ls_structured_output_format={"schema": "internal"},
+    )
+    assert bound is not None
+
+
+def test_bind_tools_rejects_unknown_named_choice():
+    def known(value: str) -> str:
+        """Known tool."""
+        return value
+
+    with pytest.raises(ValueError, match="unknown tool"):
+        ChatKiro(client=_client(b"")).bind_tools([known], tool_choice="missing")
+
+
+def test_parallel_tool_calls_false_is_enforced_locally():
+    def first(value: str) -> str:
+        """First tool."""
+        return value
+
+    def second(value: str) -> str:
+        """Second tool."""
+        return value
+
+    body = (
+        _event(
+            "toolUseEvent",
+            {"toolUseId": "one", "name": "first", "input": '{"value":"a"}'},
+        )
+        + _event(
+            "toolUseEvent",
+            {"toolUseId": "two", "name": "second", "input": '{"value":"b"}'},
+        )
+    )
+    llm = ChatKiro(client=_client(body)).bind_tools(
+        [first, second], parallel_tool_calls=False
+    )
+    with pytest.raises(Exception, match="parallel tool calls"):
+        llm.invoke("Call tools")
+
+
+def test_with_structured_output_rejects_openai_only_methods():
+    from pydantic import BaseModel
+
+    class Answer(BaseModel):
+        answer: str
+
+    llm = ChatKiro(client=_client(b""))
+    for method in ("json_mode", "json_schema"):
+        with pytest.raises(ValueError, match="function_calling"):
+            llm.with_structured_output(Answer, method=method)
+
+
+def test_bind_tools_response_format_rejected_with_guidance():
+    def tool(value: str) -> str:
+        """A tool."""
+        return value
+
+    with pytest.raises(ValueError, match="with_structured_output"):
+        ChatKiro(client=_client(b"")).bind_tools(
+            [tool], response_format={"type": "json_object"}
+        )
+
+
+def test_with_structured_output_include_raw_captures_validation_error():
+    from pydantic import BaseModel
+
+    class Answer(BaseModel):
+        count: int
+
+    body = _event(
+        "toolUseEvent",
+        {
+            "toolUseId": "structured-invalid",
+            "name": "Answer",
+            "input": '{"count":"not-an-integer"}',
+            "stop": True,
+        },
+    )
+    result = ChatKiro(client=_client(body)).with_structured_output(
+        Answer, include_raw=True
+    ).invoke("Return invalid output")
+    assert isinstance(result["raw"], AIMessage)
+    assert result["parsed"] is None
+    assert result["parsing_error"] is not None
+
+
+def test_langgraph_tool_loop_uses_chatkiro():
+    from typing import Annotated, TypedDict
+
+    from langchain_core.messages import ToolMessage
+    from langchain_core.tools import tool
+    from langgraph.graph import END, START, StateGraph
+    from langgraph.graph.message import add_messages
+    from langgraph.prebuilt import ToolNode, tools_condition
+
+    @tool
+    def add(a: int, b: int) -> int:
+        """Add two integers."""
+        return a + b
+
+    first = _FakeResponse(
+        _event(
+            "toolUseEvent",
+            {
+                "toolUseId": "add-1",
+                "name": "add",
+                "input": '{"a":2,"b":3}',
+                "stop": True,
+            },
+        )
+    )
+    second = _FakeResponse(
+        _event("assistantResponseEvent", {"content": "5"})
+    )
+
+    class SequentialSession:
+        def __init__(self):
+            self.responses = iter([first, second])
+
+        def post(self, *args, **kwargs):
+            return next(self.responses)
+
+        def close(self):
+            pass
+
+    class State(TypedDict):
+        messages: Annotated[list, add_messages]
+
+    client = KiroLLMClient(
+        access_token="test-token",
+        session=SequentialSession(),
+    )
+    model = ChatKiro(client=client).bind_tools([add])
+
+    def call_model(state: State):
+        return {"messages": [model.invoke(state["messages"])]}
+
+    builder = StateGraph(State)
+    builder.add_node("model", call_model)
+    builder.add_node("tools", ToolNode([add]))
+    builder.add_edge(START, "model")
+    builder.add_conditional_edges(
+        "model", tools_condition, {"tools": "tools", "__end__": END}
+    )
+    builder.add_edge("tools", "model")
+    result = builder.compile().invoke(
+        {"messages": [HumanMessage(content="What is 2 + 3?")]}
+    )
+
+    assert result["messages"][-1].content == "5"
+    assert any(isinstance(message, ToolMessage) for message in result["messages"])
+
+
+def test_chatopenai_compatible_public_parameter_names():
+    import inspect
+
+    bind_parameters = inspect.signature(ChatKiro.bind_tools).parameters
+    assert {
+        "tools",
+        "tool_choice",
+        "strict",
+        "parallel_tool_calls",
+        "response_format",
+    }.issubset(bind_parameters)
+
+    structured_parameters = inspect.signature(
+        ChatKiro.with_structured_output
+    ).parameters
+    assert {
+        "schema",
+        "method",
+        "include_raw",
+        "strict",
+        "tools",
+    }.issubset(structured_parameters)
+
+
+def test_required_tool_choice_raises_when_model_does_not_call_tool():
+    def lookup(value: str) -> str:
+        """Look up a value."""
+        return value
+
+    body = _event("assistantResponseEvent", {"content": "direct answer"})
+    llm = ChatKiro(client=_client(body)).bind_tools(
+        [lookup], tool_choice="required"
+    )
+    with pytest.raises(Exception, match="required tool call"):
+        llm.invoke("Use the tool")
+
+
+def test_with_structured_output_validates_arguments():
+    llm = ChatKiro(client=_client(b""))
+    with pytest.raises(ValueError, match="schema is required"):
+        llm.with_structured_output(None)
+    with pytest.raises(ValueError, match="Additional tools"):
+        llm.with_structured_output(
+            {"title": "Answer", "type": "object", "properties": {}},
+            tools=[{"name": "other"}],
+        )
+    with pytest.raises(ValueError, match="unsupported arguments"):
+        llm.with_structured_output(
+            {"title": "Answer", "type": "object", "properties": {}},
+            unsupported=True,
+        )
