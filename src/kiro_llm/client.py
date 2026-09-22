@@ -367,6 +367,38 @@ class KiroLLMClient:
             next_token=payload.get("nextToken") or payload.get("next_token"),
         )
 
+    def list_all_models(
+        self,
+        *,
+        model_provider: Optional[str] = None,
+        page_size: int = 100,
+    ) -> KiroModelCatalog:
+        """Discover every model page advertised for this credential."""
+        if not 1 <= page_size <= 100:
+            raise ValueError("page_size must be between 1 and 100")
+        all_models: List[KiroModel] = []
+        default_model: Optional[str] = None
+        next_token: Optional[str] = None
+        seen_tokens = set()
+        while True:
+            page = self.list_models(
+                model_provider=model_provider,
+                max_results=page_size,
+                next_token=next_token,
+            )
+            if default_model is None:
+                default_model = page.default_model
+            all_models.extend(page.models)
+            if not page.next_token or page.next_token in seen_tokens:
+                break
+            seen_tokens.add(page.next_token)
+            next_token = page.next_token
+        return KiroModelCatalog(
+            models=tuple(all_models),
+            default_model=default_model,
+            next_token=None,
+        )
+
     def _build_body(self, conversation_state: ConversationState) -> Dict[str, Any]:
         body = {"conversationState": conversation_state.to_dict()}
         if self._auth_type == "API_KEY":
