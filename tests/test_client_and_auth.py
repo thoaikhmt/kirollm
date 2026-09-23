@@ -35,7 +35,7 @@ def test_conversation_state_payload_shape():
     )
     msg = UserInputMessage(
         content="hi",
-        model_id="claude-sonnet-4",
+        model_id="qwen3-coder-next",
         context=UserInputMessageContext(tools=[tool]),
     )
     state = ConversationState(current_message=msg)
@@ -45,7 +45,7 @@ def test_conversation_state_payload_shape():
     assert body["chatTriggerType"] == "MANUAL"
     uim = body["currentMessage"]["userInputMessage"]
     assert uim["content"] == "hi"
-    assert uim["modelId"] == "claude-sonnet-4"
+    assert uim["modelId"] == "qwen3-coder-next"
     spec = uim["userInputMessageContext"]["tools"][0]["toolSpecification"]
     assert spec["name"] == "get_weather"
     assert spec["inputSchema"]["json"]["type"] == "object"
@@ -131,7 +131,7 @@ def test_chat_session_send_and_history():
     )
     session = _FakeSession(_FakeResponse(body))
     client = KiroLLMClient(access_token="t", region="us-east-1", session=session)
-    chat = ChatSession(client, model_id="m")
+    chat = ChatSession(client, model_id="qwen3-coder-next")
 
     reply = chat.send("hello")
     assert reply == "Hi!"
@@ -148,7 +148,7 @@ def test_tool_use_events_collected():
     )
     session = _FakeSession(_FakeResponse(body))
     client = KiroLLMClient(access_token="t", region="us-east-1", session=session)
-    chat = ChatSession(client, model_id="m")
+    chat = ChatSession(client, model_id="qwen3-coder-next")
     chat.send("weather?")
     assert len(chat.pending_tool_uses) == 1
     assert chat.pending_tool_uses[0].name == "get_weather"
@@ -378,11 +378,11 @@ def test_api_key_mode_sets_kiro_headers_and_origin():
 
 def test_list_models_parses_server_catalog():
     payload = {
-        "defaultModel": {"modelId": "claude-sonnet-4"},
+        "defaultModel": {"modelId": "qwen3-coder-next"},
         "models": [
             {
-                "modelId": "claude-sonnet-4",
-                "modelName": "Claude Sonnet 4",
+                "modelId": "qwen3-coder-next",
+                "modelName": "Qwen3 Coder Next",
                 "description": "fast",
                 "supportedInputTypes": ["TEXT", "IMAGE"],
                 "rateMultiplier": 1.0,
@@ -396,9 +396,9 @@ def test_list_models_parses_server_catalog():
     client = KiroLLMClient(access_token="ksk_test_key", session=session)
 
     catalog = client.list_models()
-    assert catalog.default_model == "claude-sonnet-4"
-    assert catalog.model_ids == ("claude-sonnet-4", "custom-model")
-    assert catalog.get("claude-sonnet-4").supported_input_types == ("TEXT", "IMAGE")
+    assert catalog.default_model == "qwen3-coder-next"
+    assert catalog.model_ids == ("qwen3-coder-next", "custom-model")
+    assert catalog.get("qwen3-coder-next").supported_input_types == ("TEXT", "IMAGE")
     assert session.last_headers["X-Amz-Target"] == "AmazonCodeWhispererService.ListAvailableModels"
     assert session.last_body == {"origin": "AI_EDITOR"}
 

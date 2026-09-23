@@ -53,14 +53,14 @@ def _client(body):
 def test_is_langchain_chat_model():
     from langchain_core.language_models.chat_models import BaseChatModel
 
-    llm = ChatKiro(client=_client(b""), model="m")
+    llm = ChatKiro(client=_client(b""), model="qwen3-coder-next")
     assert isinstance(llm, BaseChatModel)
     assert llm._llm_type == "kiro"
 
 
 def test_invoke_returns_ai_message():
     body = _event("assistantResponseEvent", {"content": "Hello from Kiro"})
-    llm = ChatKiro(client=_client(body), model="m")
+    llm = ChatKiro(client=_client(body), model="qwen3-coder-next")
     result = llm.invoke("hi")
     assert isinstance(result, AIMessage)
     assert result.content == "Hello from Kiro"
@@ -71,7 +71,7 @@ def test_stream_yields_chunks():
         _event("assistantResponseEvent", {"content": "a"})
         + _event("assistantResponseEvent", {"content": "b"})
     )
-    llm = ChatKiro(client=_client(body), model="m")
+    llm = ChatKiro(client=_client(body), model="qwen3-coder-next")
     chunks = [c.content for c in llm.stream("hi")]
     assert "".join(chunks) == "ab"
 
@@ -88,7 +88,7 @@ def test_bind_tools_and_tool_calls():
 
     from langchain_core.tools import tool
 
-    llm = ChatKiro(client=client, model="m").bind_tools([tool(get_weather)])
+    llm = ChatKiro(client=client, model="qwen3-coder-next").bind_tools([tool(get_weather)])
     result = llm.invoke("weather in Paris?")
     assert result.tool_calls
     assert result.tool_calls[0]["name"] == "get_weather"
@@ -129,7 +129,7 @@ def test_stream_preserves_tool_call_chunks():
             "toolUseId": "t1", "input": '"Paris"}', "stop": True
         })
     )
-    llm = ChatKiro(client=_client(body), model="m")
+    llm = ChatKiro(client=_client(body), model="qwen3-coder-next")
     chunks = list(llm.stream("weather?"))
     merged = sum(chunks[1:], chunks[0])
     assert merged.tool_calls[0]["name"] == "get_weather"
@@ -153,7 +153,7 @@ def test_parallel_tool_messages_become_one_current_result_turn():
 
 
 def test_access_token_is_redacted_in_model_repr():
-    llm = ChatKiro(access_token="super-secret", region="us-east-1", model="m")
+    llm = ChatKiro(access_token="super-secret", region="us-east-1", model="qwen3-coder-next")
     assert "super-secret" not in repr(llm)
 
 
@@ -184,7 +184,7 @@ def test_invoke_preserves_reasoning_and_metadata():
             "usage": {"inputTokens": 3, "outputTokens": 2},
         })
     )
-    result = ChatKiro(client=_client(body), model="m").invoke("hi")
+    result = ChatKiro(client=_client(body), model="qwen3-coder-next").invoke("hi")
     assert result.content == "answer"
     assert result.additional_kwargs["reasoning_content"] == "thinking"
     assert result.response_metadata["requestId"] == "req-1"
@@ -194,7 +194,7 @@ def test_invoke_preserves_reasoning_and_metadata():
 def test_invalid_state_event_fails_langchain_generation():
     body = _event("invalidStateEvent", {"reason": "bad", "message": "invalid"})
     with pytest.raises(Exception, match="invalid"):
-        ChatKiro(client=_client(body), model="m").invoke("hi")
+        ChatKiro(client=_client(body), model="qwen3-coder-next").invoke("hi")
 
 
 def test_async_stream_is_incremental_api():
@@ -204,7 +204,7 @@ def test_async_stream_is_incremental_api():
         _event("assistantResponseEvent", {"content": "a"})
         + _event("assistantResponseEvent", {"content": "b"})
     )
-    llm = ChatKiro(client=_client(body), model="m")
+    llm = ChatKiro(client=_client(body), model="qwen3-coder-next")
 
     async def collect():
         return [chunk async for chunk in llm.astream("hi")]
@@ -231,7 +231,7 @@ def test_with_structured_output_pydantic_returns_model():
             "stop": True,
         },
     )
-    runnable = ChatKiro(client=_client(body)).with_structured_output(Answer)
+    runnable = ChatKiro(client=_client(body), model="qwen3-coder-next").with_structured_output(Answer)
     result = runnable.invoke("Return an answer")
     assert isinstance(result, Answer)
     assert result.answer == "yes"
@@ -253,7 +253,7 @@ def test_with_structured_output_include_raw_matches_chatopenai_shape():
             "stop": True,
         },
     )
-    result = ChatKiro(client=_client(body)).with_structured_output(
+    result = ChatKiro(client=_client(body), model="qwen3-coder-next").with_structured_output(
         Answer, include_raw=True, strict=True
     ).invoke("Return structured output")
     assert set(result) == {"raw", "parsed", "parsing_error"}
@@ -278,7 +278,7 @@ def test_with_structured_output_typeddict_returns_dict():
             "stop": True,
         },
     )
-    result = ChatKiro(client=_client(body)).with_structured_output(
+    result = ChatKiro(client=_client(body), model="qwen3-coder-next").with_structured_output(
         AnswerDict, method="function_calling"
     ).invoke("Return a dict")
     assert result == {"answer": "ok", "count": 2}
@@ -301,7 +301,7 @@ def test_with_structured_output_json_schema_returns_dict():
             "stop": True,
         },
     )
-    result = ChatKiro(client=_client(body)).with_structured_output(schema).invoke(
+    result = ChatKiro(client=_client(body), model="qwen3-coder-next").with_structured_output(schema).invoke(
         "Return weather"
     )
     assert result == {"city": "Paris"}
@@ -325,7 +325,7 @@ def test_bind_tools_accepts_chatopenai_tool_choice_forms(tool_choice):
         """Get weather."""
         return city
 
-    bound = ChatKiro(client=_client(b"")).bind_tools(
+    bound = ChatKiro(client=_client(b""), model="qwen3-coder-next").bind_tools(
         [get_weather],
         tool_choice=tool_choice,
         strict=True,
@@ -341,7 +341,7 @@ def test_bind_tools_rejects_unknown_named_choice():
         return value
 
     with pytest.raises(ValueError, match="unknown tool"):
-        ChatKiro(client=_client(b"")).bind_tools([known], tool_choice="missing")
+        ChatKiro(client=_client(b""), model="qwen3-coder-next").bind_tools([known], tool_choice="missing")
 
 
 def test_parallel_tool_calls_false_is_enforced_locally():
@@ -363,7 +363,7 @@ def test_parallel_tool_calls_false_is_enforced_locally():
             {"toolUseId": "two", "name": "second", "input": '{"value":"b"}'},
         )
     )
-    llm = ChatKiro(client=_client(body)).bind_tools(
+    llm = ChatKiro(client=_client(body), model="qwen3-coder-next").bind_tools(
         [first, second], parallel_tool_calls=False
     )
     with pytest.raises(Exception, match="parallel tool calls"):
@@ -376,7 +376,7 @@ def test_with_structured_output_rejects_openai_only_methods():
     class Answer(BaseModel):
         answer: str
 
-    llm = ChatKiro(client=_client(b""))
+    llm = ChatKiro(client=_client(b""), model="qwen3-coder-next")
     for method in ("json_mode", "json_schema"):
         with pytest.raises(ValueError, match="function_calling"):
             llm.with_structured_output(Answer, method=method)
@@ -388,7 +388,7 @@ def test_bind_tools_response_format_rejected_with_guidance():
         return value
 
     with pytest.raises(ValueError, match="with_structured_output"):
-        ChatKiro(client=_client(b"")).bind_tools(
+        ChatKiro(client=_client(b""), model="qwen3-coder-next").bind_tools(
             [tool], response_format={"type": "json_object"}
         )
 
@@ -408,7 +408,7 @@ def test_with_structured_output_include_raw_captures_validation_error():
             "stop": True,
         },
     )
-    result = ChatKiro(client=_client(body)).with_structured_output(
+    result = ChatKiro(client=_client(body), model="qwen3-coder-next").with_structured_output(
         Answer, include_raw=True
     ).invoke("Return invalid output")
     assert isinstance(result["raw"], AIMessage)
@@ -462,7 +462,7 @@ def test_langgraph_tool_loop_uses_chatkiro():
         access_token="test-token",
         session=SequentialSession(),
     )
-    model = ChatKiro(client=client).bind_tools([add])
+    model = ChatKiro(client=client, model="qwen3-coder-next").bind_tools([add])
 
     def call_model(state: State):
         return {"messages": [model.invoke(state["messages"])]}
@@ -513,7 +513,7 @@ def test_required_tool_choice_raises_when_model_does_not_call_tool():
         return value
 
     body = _event("assistantResponseEvent", {"content": "direct answer"})
-    llm = ChatKiro(client=_client(body)).bind_tools(
+    llm = ChatKiro(client=_client(body), model="qwen3-coder-next").bind_tools(
         [lookup], tool_choice="required"
     )
     with pytest.raises(Exception, match="required tool call"):
@@ -521,7 +521,7 @@ def test_required_tool_choice_raises_when_model_does_not_call_tool():
 
 
 def test_with_structured_output_validates_arguments():
-    llm = ChatKiro(client=_client(b""))
+    llm = ChatKiro(client=_client(b""), model="qwen3-coder-next")
     with pytest.raises(ValueError, match="schema is required"):
         llm.with_structured_output(None)
     with pytest.raises(ValueError, match="Additional tools"):

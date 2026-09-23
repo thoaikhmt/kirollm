@@ -16,7 +16,6 @@ import sys
 
 from kiro_llm import ChatSession, KiroLLMClient, KiroApiError
 
-
 def main() -> int:
     prompt = " ".join(sys.argv[1:]) or "Say hello in one sentence."
 

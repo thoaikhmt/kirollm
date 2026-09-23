@@ -78,7 +78,10 @@ def test_chat_session_sends_image_in_current_message(tmp_path):
     image_path.write_bytes(PNG)
     body = _event("assistantResponseEvent", {"content": "seen"})
     session = _Session(body)
-    chat = ChatSession(KiroLLMClient(access_token="t", session=session))
+    chat = ChatSession(
+        KiroLLMClient(access_token="t", session=session),
+        model_id="claude-haiku-4.5",
+    )
 
     assert chat.send("Describe", images=[image_path]) == "seen"
     current = session.last_body["conversationState"]["currentMessage"]["userInputMessage"]
@@ -110,7 +113,10 @@ def test_langchain_remote_image_url_is_explicitly_rejected():
 def test_voice_adapter_transcribes_then_sends_text():
     body = _event("assistantResponseEvent", {"content": "reply"})
     session = _Session(body)
-    chat = ChatSession(KiroLLMClient(access_token="t", session=session))
+    chat = ChatSession(
+        KiroLLMClient(access_token="t", session=session),
+        model_id="qwen3-coder-next",
+    )
 
     result = chat.send_voice(
         AudioInput(b"wav", "audio/wav"),
@@ -123,7 +129,10 @@ def test_voice_adapter_transcribes_then_sends_text():
 
 def test_voice_adapter_rejects_empty_transcription():
     session = _Session(_event("assistantResponseEvent", {"content": "unused"}))
-    chat = ChatSession(KiroLLMClient(access_token="t", session=session))
+    chat = ChatSession(
+        KiroLLMClient(access_token="t", session=session),
+        model_id="qwen3-coder-next",
+    )
     with pytest.raises(VoiceInputError):
         chat.send_voice(AudioInput(b"wav"), lambda audio: "  ")
 
@@ -133,7 +142,10 @@ def test_chat_session_sends_document_in_current_message(tmp_path):
     document_path.write_text("hello document")
     body = _event("assistantResponseEvent", {"content": "seen"})
     session = _Session(body)
-    chat = ChatSession(KiroLLMClient(access_token="t", session=session))
+    chat = ChatSession(
+        KiroLLMClient(access_token="t", session=session),
+        model_id="qwen3-coder-next",
+    )
 
     assert chat.send("Read this", documents=[document_path]) == "seen"
     current = session.last_body["conversationState"]["currentMessage"]["userInputMessage"]
