@@ -5,7 +5,7 @@ Run with KIRO_API_KEY or a supported local IdC credential store.
 
 from langchain_core.tools import tool
 
-from kiro_llm.langchain import ChatKiro
+from kirollm.langchain import ChatKiro
 
 
 @tool

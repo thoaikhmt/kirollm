@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel, Field
 
-from kiro_llm.langchain import ChatKiro
+from kirollm.langchain import ChatKiro
 
 
 class Destination(BaseModel):

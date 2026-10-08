@@ -1,10 +1,10 @@
-# kiro-llm
+# kirollm
 
 Python, LangChain, and LangGraph access to Kiro's streaming model API.
 
-Repository: [github.com/thoaikhmt/kiro-llm](https://github.com/thoaikhmt/kiro-llm)
+Repository: [github.com/thoaikhmt/kirollm](https://github.com/thoaikhmt/kirollm)
 
-The distribution name is `kiro-llm`; the Python import package is `kiro_llm`
+The distribution name is `kirollm`; the Python import package is `kirollm`
 because hyphens are not valid Python identifiers.
 
 > This is an unofficial clean-room client reconstructed from Kiro CLI protocol
@@ -51,7 +51,7 @@ export KIRO_API_KEY="ksk_..."
 ```
 
 ```python
-from kiro_llm import KiroLLMClient
+from kirollm import KiroLLMClient
 
 client = KiroLLMClient()
 
@@ -69,7 +69,7 @@ Model availability depends on account entitlements and region. Do not hard-code
 a catalog:
 
 ```python
-from kiro_llm import KiroLLMClient
+from kirollm import KiroLLMClient
 
 client = KiroLLMClient()
 catalog = client.list_all_models()
@@ -92,7 +92,7 @@ limits.
 ## Low-level chat
 
 ```python
-from kiro_llm import ChatSession, KiroLLMClient
+from kirollm import ChatSession, KiroLLMClient
 
 client = KiroLLMClient()
 model_id = client.list_all_models().default_model
@@ -109,7 +109,7 @@ for text in chat.stream("Give one Python example."):
 `ChatKiro` subclasses the same `BaseChatModel` used by `ChatOpenAI`:
 
 ```python
-from kiro_llm.langchain import ChatKiro
+from kirollm.langchain import ChatKiro
 
 base = ChatKiro()
 model_id = base.list_models().default_model
@@ -125,7 +125,7 @@ print(message.response_metadata)
 
 ```python
 from langchain_core.tools import tool
-from kiro_llm.langchain import ChatKiro
+from kirollm.langchain import ChatKiro
 
 @tool
 def get_weather(city: str) -> str:
@@ -151,7 +151,7 @@ choices and `parallel_tool_calls=False` are reinforced and validated locally.
 
 ```python
 from pydantic import BaseModel, Field
-from kiro_llm.langchain import ChatKiro
+from kirollm.langchain import ChatKiro
 
 class Destination(BaseModel):
     city: str
@@ -186,7 +186,7 @@ with clear errors rather than silently ignored.
 
 ```python
 import asyncio
-from kiro_llm.langchain import ChatKiro
+from kirollm.langchain import ChatKiro
 
 llm = ChatKiro()
 
@@ -212,7 +212,7 @@ from langchain_core.tools import tool
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
-from kiro_llm.langchain import ChatKiro
+from kirollm.langchain import ChatKiro
 
 @tool
 def multiply(a: int, b: int) -> int:
@@ -249,7 +249,7 @@ The tested dependency pair is pinned because incompatible `langgraph` and
 ## Images and documents
 
 ```python
-from kiro_llm import ChatSession, DocumentInput, ImageInput, KiroLLMClient
+from kirollm import ChatSession, DocumentInput, ImageInput, KiroLLMClient
 
 chat = ChatSession(KiroLLMClient())
 
@@ -272,7 +272,7 @@ Voice is therefore a provider-neutral transcription adapter; only transcript
 text is sent to Kiro:
 
 ```python
-from kiro_llm import AudioInput, ChatSession, KiroLLMClient
+from kirollm import AudioInput, ChatSession, KiroLLMClient
 
 class WhisperAdapter:
     def transcribe(self, audio: AudioInput) -> str:
@@ -337,7 +337,7 @@ repository secret `KIRO_API_KEY`. Normal push/PR jobs exclude live tests.
 pip install -e ".[test]"
 pytest -q -m "not integration"
 ruff check src tests examples
-pyright src/kiro_llm
+pyright src/kirollm
 ```
 
 ## License

@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from kiro_llm.eventstream import (
+from kirollm.eventstream import (
     EventStreamError,
     decode_message,
     encode_message,

@@ -13,7 +13,7 @@ raises a clear error.
 
 Example
 -------
-    from kiro_llm.langchain import ChatKiro
+    from kirollm.langchain import ChatKiro
 
     # Auto-loads the Kiro CLI's stored login and auto-refreshes the token.
     llm = ChatKiro(model="claude-sonnet-4")
@@ -102,7 +102,7 @@ def _require_langchain() -> None:
     if not _LANGCHAIN_AVAILABLE:
         raise ImportError(
             "ChatKiro requires langchain-core. Install it with "
-            "`pip install langchain-core` (or `pip install kiro-llm[langchain]`)."
+            "`pip install langchain-core` (or `pip install kirollm[langchain]`)."
         ) from _IMPORT_ERROR
 
 

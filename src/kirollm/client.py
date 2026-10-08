@@ -6,7 +6,7 @@ same way the Kiro CLI does:
   an SSO/IdC bearer token; the underlying Smithy client uses ``httpBearerAuth``).
 * ``application/x-amz-json-1.0`` request with an ``X-Amz-Target`` header naming
   the operation ``AmazonCodeWhispererStreamingService.GenerateAssistantResponse``.
-* A ``conversationState`` body built from :mod:`kiro_llm.models`.
+* A ``conversationState`` body built from :mod:`kirollm.models`.
 * Response decoded as an ``application/vnd.amazon.eventstream`` byte stream and
   surfaced as typed ``ChatResponseStream`` events.
 
@@ -128,7 +128,7 @@ class KiroLLMClient:
     """
     Low-level client. Construct with a bearer token and region, then call
     :meth:`generate_assistant_response` (or the higher-level helpers in
-    :mod:`kiro_llm.chat`).
+    :mod:`kirollm.chat`).
     """
 
     def __init__(
@@ -140,7 +140,7 @@ class KiroLLMClient:
         agent_mode: Optional[str] = None,
         runtime: bool = False,
         endpoint_override: Optional[str] = None,
-        user_agent: str = "kiro-llm-py/0.1.0",
+        user_agent: str = "kirollm-py/0.1.0",
         session: Optional[requests.Session] = None,
         timeout: float = 120.0,
         credential_provider: Optional[CredentialProvider] = None,

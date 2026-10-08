@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from kiro_llm import (
+from kirollm import (
     AssistantResponseEvent,
     ChatSession,
     ConversationState,
@@ -14,13 +14,13 @@ from kiro_llm import (
     UserInputMessage,
     UserInputMessageContext,
 )
-from kiro_llm.auth import (
+from kirollm.auth import (
     KiroCliCredentialProvider,
     KiroCredentialProvider,
     SecretStore,
     load_default_credentials,
 )
-from kiro_llm.eventstream import encode_message
+from kirollm.eventstream import encode_message
 
 
 # --------------------------------------------------------------------------- #
@@ -218,7 +218,7 @@ def test_expired_token_triggers_refresh(tmp_path, monkeypatch):
         captured["payload"] = json
         return _Resp()
 
-    monkeypatch.setattr("kiro_llm.auth.requests.post", fake_post)
+    monkeypatch.setattr("kirollm.auth.requests.post", fake_post)
 
     token = provider.get_access_token()
     assert token == "NEW"
@@ -336,7 +336,7 @@ def test_cli_provider_parses_token_without_exposing_it(monkeypatch):
             },
         })
 
-    monkeypatch.setattr("kiro_llm.auth.subprocess.run", lambda *args, **kwargs: Result())
+    monkeypatch.setattr("kirollm.auth.subprocess.run", lambda *args, **kwargs: Result())
     provider = KiroCliCredentialProvider(executable="kiro-cli")
     assert provider.get_access_token() == "secret-token"
     assert provider.region == "eu-central-1"
@@ -347,7 +347,7 @@ def test_default_credentials_use_environment_without_cli(monkeypatch):
     monkeypatch.delenv("KIRO_API_KEY", raising=False)
     monkeypatch.setenv("KIRO_ACCESS_TOKEN", "environment-token")
     monkeypatch.setattr(
-        "kiro_llm.auth.KiroCliCredentialProvider",
+        "kirollm.auth.KiroCliCredentialProvider",
         lambda: pytest.fail("default auth must not instantiate kiro-cli provider"),
     )
     provider = load_default_credentials()

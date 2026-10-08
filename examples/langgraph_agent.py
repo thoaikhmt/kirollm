@@ -8,7 +8,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
 
-from kiro_llm.langchain import ChatKiro
+from kirollm.langchain import ChatKiro
 
 
 @tool

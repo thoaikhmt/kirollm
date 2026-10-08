@@ -1,5 +1,5 @@
 """
-High-level convenience API on top of :class:`kiro_llm.client.KiroLLMClient`.
+High-level convenience API on top of :class:`kirollm.client.KiroLLMClient`.
 
 :class:`ChatSession` keeps conversation history and exposes:
 

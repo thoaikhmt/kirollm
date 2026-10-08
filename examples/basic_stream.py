@@ -14,7 +14,7 @@ store; it does not require the Kiro CLI executable.
 import os
 import sys
 
-from kiro_llm import ChatSession, KiroLLMClient, KiroApiError
+from kirollm import ChatSession, KiroLLMClient, KiroApiError
 
 def main() -> int:
     prompt = " ".join(sys.argv[1:]) or "Say hello in one sentence."

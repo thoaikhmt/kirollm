@@ -6,14 +6,14 @@ import zlib
 
 import pytest
 
-from kiro_llm import (
+from kirollm import (
     AssistantResponseEvent,
     ChatSession,
     ConversationState,
     KiroLLMClient,
     ImageInput,
 )
-from kiro_llm.models import UserInputMessage
+from kirollm.models import UserInputMessage
 
 pytestmark = pytest.mark.integration
 

@@ -6,9 +6,9 @@ pytest.importorskip("langchain_core")
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from kiro_llm import KiroLLMClient
-from kiro_llm.eventstream import encode_message
-from kiro_llm.langchain import ChatKiro, _messages_to_kiro
+from kirollm import KiroLLMClient
+from kirollm.eventstream import encode_message
+from kirollm.langchain import ChatKiro, _messages_to_kiro
 
 
 def _event(event_type, payload):

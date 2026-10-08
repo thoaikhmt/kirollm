@@ -2,7 +2,7 @@
 
 import asyncio
 
-from kiro_llm.langchain import ChatKiro
+from kirollm.langchain import ChatKiro
 
 
 llm = ChatKiro()

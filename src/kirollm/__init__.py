@@ -1,9 +1,9 @@
 """
-kiro-llm: call an LLM the same way the Kiro CLI does.
+kirollm: call an LLM the same way the Kiro CLI does.
 
 Quick start::
 
-    from kiro_llm import KiroLLMClient, ChatSession
+    from kirollm import KiroLLMClient, ChatSession
 
     client = KiroLLMClient(access_token="<bearer-token>", region="us-east-1")
     chat = ChatSession(client, model_id="claude-sonnet-4")

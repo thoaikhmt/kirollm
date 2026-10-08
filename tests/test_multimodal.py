@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from kiro_llm import (
+from kirollm import (
     AudioInput,
     ChatSession,
     ImageInput,
@@ -12,8 +12,8 @@ from kiro_llm import (
     VoiceInputError,
     image_from_data_url,
 )
-from kiro_llm.eventstream import encode_message
-from kiro_llm.langchain import _messages_to_kiro
+from kirollm.eventstream import encode_message
+from kirollm.langchain import _messages_to_kiro
 from langchain_core.messages import HumanMessage
 
 
