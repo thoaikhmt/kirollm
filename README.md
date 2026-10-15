@@ -340,6 +340,34 @@ ruff check src tests examples
 pyright src/kirollm
 ```
 
+## Releasing
+
+Publishing is handled by `.github/workflows/publish.yml`:
+
+- Pushing a tag matching `vX.Y.Z` (or publishing a GitHub Release) builds the
+  sdist and wheel and uploads them to PyPI.
+- **Run workflow** with `target: testpypi` uploads to TestPyPI; `target: pypi`
+  uploads to PyPI.
+
+The workflow verifies the tag matches `project.version` in `pyproject.toml`, so
+bump the version before tagging:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+### One-time PyPI setup (trusted publishing)
+
+No API tokens are stored. Configure a trusted publisher on
+[pypi.org](https://pypi.org/manage/account/publishing/) and
+[test.pypi.org](https://test.pypi.org/manage/account/publishing/) with:
+
+- Owner: `thoaikhmt`
+- Repository: `kirollm`
+- Workflow: `publish.yml`
+- Environment: `pypi` (and `testpypi` for TestPyPI)
+
 ## License
 
 MIT

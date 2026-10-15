@@ -140,7 +140,7 @@ class KiroLLMClient:
         agent_mode: Optional[str] = None,
         runtime: bool = False,
         endpoint_override: Optional[str] = None,
-        user_agent: str = "kirollm-py/0.1.0",
+        user_agent: str = "kirollm-py/1.0.0",
         session: Optional[requests.Session] = None,
         timeout: float = 120.0,
         credential_provider: Optional[CredentialProvider] = None,

@@ -4,14 +4,40 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kirollm"
-version = "0.1.0"
+version = "1.0.0"
 description = "Python and LangChain client for Kiro's streaming LLM API"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
+authors = [
+    { name = "thoaikhmt" },
+]
+keywords = [
+    "kiro",
+    "llm",
+    "langchain",
+    "langgraph",
+    "streaming",
+    "ai",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Typing :: Typed",
+]
 dependencies = [
     "requests==2.34.2",
 ]
+
+[project.urls]
+Homepage = "https://github.com/thoaikhmt/kirollm"
+Repository = "https://github.com/thoaikhmt/kirollm"
+Issues = "https://github.com/thoaikhmt/kirollm/issues"
 
 [project.optional-dependencies]
 test = [
